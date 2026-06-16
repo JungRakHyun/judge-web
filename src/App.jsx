@@ -129,6 +129,7 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
+    if (isAuthLoading) return;
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setJudges(data);
