@@ -69,11 +69,16 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
+  // useEffect(() => {
+  //    return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+  // }, []);
+
+  // 인증 상태 확인 로직 수정
   useEffect(() => {
-    // return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setIsAuthLoading(false);
+    });
   }, []);
   
   // 리디렉션 결과 처리
