@@ -34,6 +34,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -69,7 +70,15 @@ export default function JudgeMapApp() {
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    // return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    return onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false);
+  }, []);
+  
+  // 리디렉션 결과 처리
+  useEffect(() => {
+    getRedirectResult(auth).catch((error) => console.error("로그인 결과 확인 에러:", error));
   }, []);
 
   // 💡 검색어, 정렬, 탭, 지역이 바뀔 때마다 무한 스크롤 개수 초기화
@@ -239,7 +248,7 @@ useEffect(() => {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  if (showSplash) {
+  if (showSplash || isAuthLoading) { // 인증 확인 전까지 로딩
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
         <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
