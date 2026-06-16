@@ -175,12 +175,11 @@ export default function JudgeMapApp() {
 
   const handleLogin = async () => {
   try {
+    // 팝업 없이 리디렉션 시작
     await signInWithRedirect(auth, googleProvider);
-    console.log("로그인 성공");
   } catch (error) {
-    // 에러 전체를 콘솔에 출력 (이걸 봐야 원인을 압니다)
-    console.error("로그인 에러 상세 내용:", error);
-    alert("로그인 에러: " + error.message); // 브라우저 창으로 바로 띄우기
+    console.error("리디렉션 시작 에러:", error);
+    alert("리디렉션 실패: " + error.message);
   }
 };
 
@@ -188,11 +187,13 @@ useEffect(() => {
   getRedirectResult(auth)
     .then((result) => {
       if (result) {
-        console.log("로그인 성공!");
+        // 로그인이 성공하면 자동으로 페이지가 이동되거나 상태가 업데이트됩니다.
+        console.log("로그인 성공! 유저 정보:", result.user);
       }
     })
     .catch((error) => {
-      console.error("로그인 에러:", error);
+      console.error("로그인 결과 확인 에러:", error);
+      // 이 부분에서 발생하는 에러 메시지를 확인하세요!
     });
 }, []);
 
