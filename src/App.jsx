@@ -174,28 +174,9 @@ export default function JudgeMapApp() {
   }, [currentTab, showSplash]);
 
   const handleLogin = async () => {
-  try {
-    // 팝업 없이 리디렉션 시작
-    await signInWithRedirect(auth, googleProvider);
-  } catch (error) {
-    console.error("리디렉션 시작 에러:", error);
-    alert("리디렉션 실패: " + error.message);
-  }
-};
-
-useEffect(() => {
-  getRedirectResult(auth)
-    .then((result) => {
-      if (result) {
-        // 로그인이 성공하면 자동으로 페이지가 이동되거나 상태가 업데이트됩니다.
-        console.log("로그인 성공! 유저 정보:", result.user);
-      }
-    })
-    .catch((error) => {
-      console.error("로그인 결과 확인 에러:", error);
-      // 이 부분에서 발생하는 에러 메시지를 확인하세요!
-    });
-}, []);
+    try { await signInWithPopup(auth, googleProvider); showToast("로그인되었습니다."); } 
+    catch (error) { showToast("로그인 중 문제가 발생했습니다.", "error"); }
+  };
 
   const handleLogout = async () => {
     if (window.confirm("로그아웃하시겠습니까?")) {
