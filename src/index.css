@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+
+@theme {
+  --font-sans: "Pretendard", sans-serif;
+}
+
+body {
+  -webkit-tap-highlight-color: transparent; 
+  background-color: #020617; 
+  margin: 0;
+  overflow: hidden; 
+}
+
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
