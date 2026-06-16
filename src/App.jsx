@@ -175,7 +175,7 @@ export default function JudgeMapApp() {
 
   const handleLogin = async () => {
   try {
-    await signInWithPopup(auth, googleProvider);
+    await signInWithRedirect(auth, googleProvider);
     console.log("로그인 성공");
   } catch (error) {
     // 에러 전체를 콘솔에 출력 (이걸 봐야 원인을 압니다)
@@ -183,6 +183,18 @@ export default function JudgeMapApp() {
     alert("로그인 에러: " + error.message); // 브라우저 창으로 바로 띄우기
   }
 };
+
+useEffect(() => {
+  getRedirectResult(auth)
+    .then((result) => {
+      if (result) {
+        console.log("로그인 성공!");
+      }
+    })
+    .catch((error) => {
+      console.error("로그인 에러:", error);
+    });
+}, []);
 
   const handleLogout = async () => {
     if (window.confirm("로그아웃하시겠습니까?")) {
