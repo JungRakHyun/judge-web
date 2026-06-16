@@ -174,9 +174,15 @@ export default function JudgeMapApp() {
   }, [currentTab, showSplash]);
 
   const handleLogin = async () => {
-    try { await signInWithPopup(auth, googleProvider); showToast("로그인되었습니다."); } 
-    catch (error) { showToast("로그인 중 문제가 발생했습니다.", "error"); }
-  };
+  try {
+    await signInWithPopup(auth, googleProvider);
+    console.log("로그인 성공");
+  } catch (error) {
+    // 에러 전체를 콘솔에 출력 (이걸 봐야 원인을 압니다)
+    console.error("로그인 에러 상세 내용:", error);
+    alert("로그인 에러: " + error.message); // 브라우저 창으로 바로 띄우기
+  }
+};
 
   const handleLogout = async () => {
     if (window.confirm("로그아웃하시겠습니까?")) {
