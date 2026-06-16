@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -34,7 +34,6 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -69,21 +68,8 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // useEffect(() => {
-  //    return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
-  // }, []);
-
-  // 인증 상태 확인 로직 수정
   useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthLoading(false);
-    });
-  }, []);
-  
-  // 리디렉션 결과 처리
-  useEffect(() => {
-    getRedirectResult(auth).catch((error) => console.error("로그인 결과 확인 에러:", error));
+    return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
   }, []);
 
   // 💡 검색어, 정렬, 탭, 지역이 바뀔 때마다 무한 스크롤 개수 초기화
@@ -129,7 +115,6 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
-    if (isAuthLoading) return;
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setJudges(data);
@@ -189,28 +174,9 @@ export default function JudgeMapApp() {
   }, [currentTab, showSplash]);
 
   const handleLogin = async () => {
-  try {
-    // 팝업 없이 리디렉션 시작
-    await signInWithRedirect(auth, googleProvider);
-  } catch (error) {
-    console.error("리디렉션 시작 에러:", error);
-    alert("리디렉션 실패: " + error.message);
-  }
-};
-
-useEffect(() => {
-  getRedirectResult(auth)
-    .then((result) => {
-      if (result) {
-        // 로그인이 성공하면 자동으로 페이지가 이동되거나 상태가 업데이트됩니다.
-        console.log("로그인 성공! 유저 정보:", result.user);
-      }
-    })
-    .catch((error) => {
-      console.error("로그인 결과 확인 에러:", error);
-      // 이 부분에서 발생하는 에러 메시지를 확인하세요!
-    });
-}, []);
+    try { await signInWithPopup(auth, googleProvider); showToast("로그인되었습니다."); } 
+    catch (error) { showToast("로그인 중 문제가 발생했습니다.", "error"); }
+  };
 
   const handleLogout = async () => {
     if (window.confirm("로그아웃하시겠습니까?")) {
@@ -254,7 +220,7 @@ useEffect(() => {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  if (showSplash || isAuthLoading) { // 인증 확인 전까지 로딩
+  if (showSplash) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
         <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
