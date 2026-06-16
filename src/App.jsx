@@ -75,16 +75,10 @@ export default function JudgeMapApp() {
 
   // 인증 상태 확인 로직 수정
   useEffect(() => {
-    onAuthStateChanged(auth, (user) => {
-    if (user) {
-      console.log(">>> 사용자 로그인 상태 확인됨:", user.email);
-      setUser(user);
-    } else {
-      console.log(">>> 사용자 로그아웃 상태");
-      setUser(null);
-    }
-    setIsAuthLoading(false);
-  });
+    return onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false);
+    });
   }, []);
   
   // 리디렉션 결과 처리

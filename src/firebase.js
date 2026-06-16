@@ -15,7 +15,8 @@ const firebaseConfig = {
 
 // 설정값을 바탕으로 파이어베이스를 켜고(app), 데이터베이스(db)를 밖으로 내보냅니다.
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, "testweb");
+// export const db = getFirestore(app, "testweb");
+export const db = getFirestore(app);
 
 // 구글 로그인 인증 모듈 초기화
 export const auth = getAuth(app);
