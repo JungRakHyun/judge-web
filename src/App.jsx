@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+// 💡 리디렉션 삭제. 가장 빠르고 에러 없는 팝업 방식으로 복원.
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
@@ -67,6 +68,7 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
+  // 가상 키보드 방어 로직
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -78,35 +80,13 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [핵심 해결] 로그인 루프를 끊는 완벽한 대기 로직
+  // 💡 [핵심] 가장 빠르고 깔끔한 순정 로그인 상태 확인
   useEffect(() => {
-    let isMounted = true;
-
-    // 1. 구글에서 앱으로 돌아왔을 때 가장 먼저 티켓을 확인합니다.
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user && isMounted) {
-          showToast("로그인 성공!");
-        }
-      })
-      .catch((error) => console.error("리디렉션 에러:", error))
-      .finally(() => {
-        // 2. 🚨 티켓 확인이 '완전히 끝난 후에만' 로딩 화면을 없앱니다.
-        // 이 처리가 없어서 그동안 로그인 안 된 줄 알고 튕겨버렸던 것입니다.
-        if (isMounted) setIsAuthLoading(false);
-      });
-
-    // 일반 상태 감지
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) {
-        setUser(currentUser);
-      }
+      setUser(currentUser);
+      setIsAuthLoading(false);
     });
-
-    return () => {
-      isMounted = false;
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -200,9 +180,22 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
+  // 💡 [핵심] 로그인 처리: 증발하는 리디렉션 대신 팝업 직접 호출. 
+  // 이제 firebase.js 주소가 정상이라 계정 선택 후 멈추지 않습니다!
   const handleLogin = () => {
-    // 💡 무한 로딩 원인 완벽 제거: 클릭하자마자 바로 창을 이동시킵니다.
-    signInWithRedirect(auth, googleProvider);
+    signInWithPopup(auth, googleProvider)
+      .then((result) => {
+        showToast("로그인 성공!");
+        setUser(result.user); // 성공 즉시 화면 강제 갱신
+      })
+      .catch((error) => {
+        if (error.code === 'auth/popup-blocked') {
+          // 브라우저가 막았을 때만 명확하게 경고창 띄우기
+          alert("⚠️ 브라우저 팝업이 차단되었습니다! 주소창 오른쪽에서 팝업을 허용해주세요.");
+        } else {
+          showToast("로그인 취소 또는 실패", "error");
+        }
+      });
   };
 
   const handleLogout = async () => {
