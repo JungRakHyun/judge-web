@@ -6,8 +6,10 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+// 💡 리디렉션 제거하고 signInWithPopup으로 복구
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
+// 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
@@ -33,7 +35,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 인증 로딩 상태 유지
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -67,7 +69,7 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 가상 키보드 활성화 감지 및 팝업 메뉴 높이 조정
+  // 가상 키보드 활성화 감지 (모바일 레이아웃 최적화)
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -79,33 +81,13 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 인증 상태 확인 및 무한 로딩 방지 로직
+  // 💡 심플하고 안정적인 인증 상태 감지 로직으로 복구
   useEffect(() => {
-    let isMounted = true;
-
-    getRedirectResult(auth).then((result) => {
-      if (result?.user && isMounted) {
-        showToast("로그인 성공!");
-      }
-    }).catch(error => console.error("리디렉션 에러:", error));
-
-    const safetyTimer = setTimeout(() => {
-      if (isMounted) setIsAuthLoading(false);
-    }, 4000);
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) {
-        clearTimeout(safetyTimer);
-        setUser(currentUser);
-        setIsAuthLoading(false);
-      }
+      setUser(currentUser);
+      setIsAuthLoading(false);
     });
-
-    return () => {
-      isMounted = false;
-      clearTimeout(safetyTimer);
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -139,7 +121,7 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
-    if (isAuthLoading) return;
+    if (isAuthLoading) return; // 인증 정보 확인 전엔 데이터 요청 대기
 
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -199,12 +181,20 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
+  // 💡 리디렉션 대신 팝업 직접 호출 및 에러 대응 추가
   const handleLogin = () => {
-    setIsAuthLoading(true);
-    signInWithRedirect(auth, googleProvider).catch(() => {
-      setIsAuthLoading(false);
-      showToast("로그인 이동 중 오류가 발생했습니다.", "error");
-    });
+    signInWithPopup(auth, googleProvider)
+      .then((result) => {
+        showToast("로그인 성공!");
+        setUser(result.user); // 성공 시 UI 즉시 갱신
+      })
+      .catch((error) => {
+        if (error.code === 'auth/popup-blocked') {
+          showToast("모바일 브라우저의 팝업 차단을 해제해주세요.", "error");
+        } else {
+          showToast("로그인 실패: " + error.message, "error");
+        }
+      });
   };
 
   const handleLogout = async () => {
@@ -248,6 +238,7 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
+  // 로딩 인디케이터 방어 로직
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
