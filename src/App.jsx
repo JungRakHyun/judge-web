@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithRedirect, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
@@ -78,13 +78,35 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [핵심] 일체의 꼼수 없이 순정 onAuthStateChanged만 사용 (가장 안정적임)
+  // 💡 [핵심 해결] 로그인 루프를 끊는 완벽한 대기 로직
   useEffect(() => {
+    let isMounted = true;
+
+    // 1. 구글에서 앱으로 돌아왔을 때 가장 먼저 티켓을 확인합니다.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user && isMounted) {
+          showToast("로그인 성공!");
+        }
+      })
+      .catch((error) => console.error("리디렉션 에러:", error))
+      .finally(() => {
+        // 2. 🚨 티켓 확인이 '완전히 끝난 후에만' 로딩 화면을 없앱니다.
+        // 이 처리가 없어서 그동안 로그인 안 된 줄 알고 튕겨버렸던 것입니다.
+        if (isMounted) setIsAuthLoading(false);
+      });
+
+    // 일반 상태 감지
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthLoading(false); // 리디렉션 후 돌아왔을 때 여기서 자동으로 로딩이 풀림
+      if (isMounted) {
+        setUser(currentUser);
+      }
     });
-    return () => unsubscribe();
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -178,8 +200,8 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 리디렉션 직접 호출 (팝업 차단 원천 무시)
   const handleLogin = () => {
+    // 💡 무한 로딩 원인 완벽 제거: 클릭하자마자 바로 창을 이동시킵니다.
     signInWithRedirect(auth, googleProvider);
   };
 
