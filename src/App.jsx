@@ -78,35 +78,30 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [최종 완결판] 로그인 루프도, 무한 로딩도 없는 완벽한 대기 로직
+  // 💡 구글에서 돌아온 결과를 처리하는 최종 로직
   useEffect(() => {
     let isMounted = true;
 
-    // 만에 하나 통신이 꼬여도 영원히 로딩창에 갇히지 않도록 3.5초 뒤 강제 해제
     const failsafeTimer = setTimeout(() => {
       if (isMounted) setIsAuthLoading(false);
     }, 3500);
 
-    // 구글에서 앱으로 돌아왔을 때, 파이어베이스가 백그라운드에서 티켓을 확인합니다.
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user && isMounted) showToast("로그인 성공!");
       })
       .catch((error) => console.error("로그인 에러:", error))
       .finally(() => {
-        // 티켓 확인이 '완전히 끝났을 때만' 로딩창을 없앱니다! (루프 해결의 핵심)
         if (isMounted) {
           setIsAuthLoading(false);
           clearTimeout(failsafeTimer);
         }
       });
 
-    // 일반 유저 상태 감지
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!isMounted) return;
       setUser(currentUser);
       if (currentUser) {
-        // 로그인이 확인되면 즉시 로딩창 해제
         setIsAuthLoading(false);
         clearTimeout(failsafeTimer);
       }
@@ -212,7 +207,10 @@ export default function JudgeMapApp() {
 
   const handleLogin = () => {
     setIsAuthLoading(true);
-    signInWithRedirect(auth, googleProvider);
+    signInWithRedirect(auth, googleProvider).catch((error) => {
+      setIsAuthLoading(false);
+      alert("로그인 페이지 이동 중 오류가 발생했습니다: " + error.message);
+    });
   };
 
   const handleLogout = async () => {
@@ -256,7 +254,6 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  // 로딩 화면 방어막
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
