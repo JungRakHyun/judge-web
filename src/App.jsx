@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -34,6 +34,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 파이어베이스 인증 상태 로딩 추가
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -68,8 +69,26 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
+  // 💡 최적화된 인증 수명 주기 상태 관리
   useEffect(() => {
-    return onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    // 1. 모바일 리디렉션 로그인 결과 확인 리스너
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setUser(result.user);
+        }
+      })
+      .catch((error) => {
+        console.error("리디렉션 인증 실패 처리:", error);
+      });
+
+    // 2. 로그인 세션 유지상태 추적 리스너
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false); // 인증 프로세스 체크가 끝나면 로딩 해제
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // 💡 검색어, 정렬, 탭, 지역이 바뀔 때마다 무한 스크롤 개수 초기화
@@ -77,27 +96,21 @@ export default function JudgeMapApp() {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-// 💡 딥링킹(Deep Linking) 파싱 로직 추가
+  // 💡 딥링킹(Deep Linking) 파싱 로직 추가
   useEffect(() => {
-    // 1. 파이어베이스에서 판사 데이터 로딩이 완료되었는지 확인
     if (judges.length > 0) {
-      // 2. 현재 주소창의 URL을 분석
       const urlParams = new URLSearchParams(window.location.search);
       const targetJudgeId = urlParams.get('judgeId');
       
-      // 3. 주소창에 judgeId가 있고, 아직 팝업이 안 켜져 있다면
       if (targetJudgeId && !selectedJudge) {
         const targetJudge = judges.find(j => j.id === targetJudgeId);
-        
         if (targetJudge) {
-          setSelectedJudge(targetJudge); // 해당 판사 팝업을 즉시 오픈!
-          
-          // (선택사항) 팝업을 연 후에는 주소창을 원래대로 깔끔하게 되돌림
+          setSelectedJudge(targetJudge); 
           window.history.replaceState({}, document.title, window.location.pathname);
         }
       }
     }
-  }, [judges]); // 데이터가 들어올 때마다 한 번씩 체크
+  }, [judges]);
   
   // 💡 무한 스크롤 센서 (Intersection Observer)
   const lastElementRef = useCallback(node => {
@@ -106,7 +119,6 @@ export default function JudgeMapApp() {
     
     observer.current = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting) {
-        // 하단 도달 시 10개씩 추가 로딩
         setDisplayCount(prev => prev + 10);
       }
     });
@@ -115,6 +127,9 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
+    // 인증 확인이 완전히 끝날 때까지 Firestore 스냅샷 요청 대기 (권한 거부 예방)
+    if (isAuthLoading) return;
+
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setJudges(data);
@@ -133,7 +148,7 @@ export default function JudgeMapApp() {
       });
     }
     return () => { unsubJudges(); unsubReports(); };
-  }, [selectedJudge?.id, user?.uid]);
+  }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
@@ -173,9 +188,13 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
+  // 💡 모바일 브라우저 팝업 차단 우회를 위해 리디렉션 로그인 적용
   const handleLogin = async () => {
-    try { await signInWithPopup(auth, googleProvider); showToast("로그인되었습니다."); } 
-    catch (error) { showToast("로그인 중 문제가 발생했습니다.", "error"); }
+    try { 
+      await signInWithRedirect(auth, googleProvider); 
+    } catch (error) { 
+      showToast("로그인창 이동에 실패했습니다.", "error"); 
+    }
   };
 
   const handleLogout = async () => {
@@ -220,7 +239,8 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  if (showSplash) {
+  // 💡 스플래시 인디케이터나 세션 초기화 완료 처리 전까지 구조 대기
+  if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
         <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
@@ -283,7 +303,6 @@ export default function JudgeMapApp() {
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      {/* 💡 무한 스크롤 배열 슬라이싱 (Map 지역 리스트) */}
                       {regionJudges.slice(0, displayCount).map(j => (
                         <div key={j.id} onClick={() => setSelectedJudge(j)} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                           <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
@@ -293,8 +312,6 @@ export default function JudgeMapApp() {
                           </div>
                         </div>
                       ))}
-                      
-                      {/* 무한 스크롤 로딩 인디케이터 센서 */}
                       {displayCount < regionJudges.length && (
                         <div ref={lastElementRef} className="py-4 flex justify-center w-full">
                           <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
@@ -332,7 +349,6 @@ export default function JudgeMapApp() {
               <div className="flex flex-col gap-3 pb-6">
                 {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
                   <>
-                    {/* 💡 무한 스크롤 배열 슬라이싱 (통합 검색 리스트) */}
                     {searchedJudges.slice(0, displayCount).map(j => (
                       <div key={j.id} onClick={() => setSelectedJudge(j)} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                         <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
@@ -342,8 +358,6 @@ export default function JudgeMapApp() {
                         </div>
                       </div>
                     ))}
-                    
-                    {/* 무한 스크롤 로딩 인디케이터 센서 */}
                     {displayCount < searchedJudges.length && (
                       <div ref={lastElementRef} className="py-4 flex justify-center w-full">
                         <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
