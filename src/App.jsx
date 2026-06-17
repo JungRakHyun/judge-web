@@ -6,10 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 리디렉션 싹 지우고 가장 안정적인 Popup 방식으로 복구
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, signOut, onAuthStateChanged } from 'firebase/auth';
 
-// 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
@@ -69,7 +67,6 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 가상 키보드 최적화
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -81,11 +78,11 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 심플하고 강력한 인증 상태 복구 (타이머 전부 제거)
+  // 💡 [핵심] 일체의 꼼수 없이 순정 onAuthStateChanged만 사용 (가장 안정적임)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setIsAuthLoading(false);
+      setIsAuthLoading(false); // 리디렉션 후 돌아왔을 때 여기서 자동으로 로딩이 풀림
     });
     return () => unsubscribe();
   }, []);
@@ -181,21 +178,9 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 [핵심 해결] 팝업 차단 방지 로직 (상태 업데이트 제거)
+  // 💡 리디렉션 직접 호출 (팝업 차단 원천 무시)
   const handleLogin = () => {
-    // 🚨 절대 이 부분에 setIsAuthLoading(true) 같은 상태 변경 코드를 넣으면 안 됩니다! (브라우저가 팝업을 차단함)
-    signInWithPopup(auth, googleProvider)
-      .then((result) => {
-        showToast("로그인 성공!");
-        setUser(result.user);
-      })
-      .catch((error) => {
-        if (error.code === 'auth/popup-blocked') {
-          showToast("팝업이 차단되었습니다. 브라우저 설정에서 허용해주세요.", "error");
-        } else {
-          showToast("로그인 실패: " + error.message, "error");
-        }
-      });
+    signInWithRedirect(auth, googleProvider);
   };
 
   const handleLogout = async () => {
