@@ -6,8 +6,7 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 리디렉션 관련 함수를 빼고 팝업 함수로 원복합니다.
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -69,21 +68,28 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 💡 [핵심] 인증 상태 무한 로딩 방지 (안전장치 추가)
+  // 💡 인증 상태 확인 & 무한 로딩 방지 타이머
   useEffect(() => {
-    // 3초 뒤에는 통신이 지연되더라도 강제로 로딩 화면을 종료합니다.
-    const fallbackTimer = setTimeout(() => {
+    // 앱으로 돌아왔을 때 로그인 결과 처리
+    getRedirectResult(auth).then((result) => {
+      if (result && result.user) {
+        showToast("로그인 성공!");
+      }
+    }).catch(error => console.error("리디렉션 에러:", error));
+
+    // 혹시라도 파이어베이스 응답이 꼬일 경우를 대비해 4초 뒤 무조건 로딩 강제 해제
+    const safetyTimer = setTimeout(() => {
       setIsAuthLoading(false);
-    }, 3000);
+    }, 4000);
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      clearTimeout(fallbackTimer); // 파이어베이스가 정상 응답하면 타이머 즉시 해제
+      clearTimeout(safetyTimer); // 정상 응답 시 타이머 취소
       setUser(currentUser);
-      setIsAuthLoading(false);
+      setIsAuthLoading(false); // 로딩 끝! 화면 보여줌
     });
 
     return () => {
-      clearTimeout(fallbackTimer);
+      clearTimeout(safetyTimer);
       unsubscribe();
     };
   }, []);
@@ -179,19 +185,13 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 [핵심] 모바일 팝업 차단 우회 및 동기식 호출 (async 제거)
+  // 💡 팝업 대신 리디렉션으로 변경 (모바일 팝업 차단 해결)
   const handleLogin = () => {
-    signInWithPopup(auth, googleProvider)
-      .then(() => {
-        showToast("로그인 성공!");
-      })
-      .catch((error) => {
-        if (error.code === 'auth/popup-blocked') {
-          showToast("팝업이 차단되었습니다. 브라우저 설정에서 허용해주세요.", "error");
-        } else {
-          showToast("로그인 실패: " + error.message, "error");
-        }
-      });
+    setIsAuthLoading(true); // 버튼 누르자마자 로딩 화면 띄우기
+    signInWithRedirect(auth, googleProvider).catch((error) => {
+      setIsAuthLoading(false);
+      showToast("로그인창 이동 중 에러가 발생했습니다.", "error");
+    });
   };
 
   const handleLogout = async () => {
