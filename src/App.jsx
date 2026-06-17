@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 리디렉션으로 복구 (팝업은 브라우저가 강제 차단하므로 폐기)
 import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -79,54 +78,44 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [핵심 해결] sessionStorage를 활용한 완벽한 로그인 타이밍 제어
+  // 💡 [최종 완결판] 로그인 루프도, 무한 로딩도 없는 완벽한 대기 로직
   useEffect(() => {
     let isMounted = true;
-    // 우리가 구글 로그인 창으로 보냈던 것인지 기록을 확인합니다.
-    const isRedirecting = sessionStorage.getItem('isRedirecting') === 'true';
 
+    // 만에 하나 통신이 꼬여도 영원히 로딩창에 갇히지 않도록 3.5초 뒤 강제 해제
+    const failsafeTimer = setTimeout(() => {
+      if (isMounted) setIsAuthLoading(false);
+    }, 3500);
+
+    // 구글에서 앱으로 돌아왔을 때, 파이어베이스가 백그라운드에서 티켓을 확인합니다.
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user && isMounted) showToast("로그인 성공!");
+      })
+      .catch((error) => console.error("로그인 에러:", error))
+      .finally(() => {
+        // 티켓 확인이 '완전히 끝났을 때만' 로딩창을 없앱니다! (루프 해결의 핵심)
+        if (isMounted) {
+          setIsAuthLoading(false);
+          clearTimeout(failsafeTimer);
+        }
+      });
+
+    // 일반 유저 상태 감지
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!isMounted) return;
       setUser(currentUser);
-      
       if (currentUser) {
-        // 1. 정상적으로 유저 정보가 들어온 경우
-        sessionStorage.removeItem('isRedirecting');
+        // 로그인이 확인되면 즉시 로딩창 해제
         setIsAuthLoading(false);
-      } else {
-        // 2. 유저 정보가 없을 때
-        if (isRedirecting) {
-          // 구글에서 막 돌아왔다면 파이어베이스가 티켓을 발급할 때까지 기다려줍니다.
-          getRedirectResult(auth)
-            .then((result) => {
-              if (result?.user) showToast("로그인 성공!");
-            })
-            .catch((error) => console.error("로그인 에러:", error))
-            .finally(() => {
-              if (isMounted) {
-                sessionStorage.removeItem('isRedirecting');
-                setIsAuthLoading(false); // 처리가 다 끝나면 비로소 로딩 해제
-              }
-            });
-        } else {
-          // 구글 로그인 기록이 없으면 일반 비로그인 유저이므로 바로 화면 표시
-          setIsAuthLoading(false);
-        }
+        clearTimeout(failsafeTimer);
       }
     });
-
-    // 만약 통신이 끊겨서 영원히 로딩되는 것을 막기 위한 5초 안전 타이머
-    const timer = setTimeout(() => {
-      if (isMounted) {
-        sessionStorage.removeItem('isRedirecting');
-        setIsAuthLoading(false);
-      }
-    }, 5000);
 
     return () => {
       isMounted = false;
       unsubscribe();
-      clearTimeout(timer);
+      clearTimeout(failsafeTimer);
     };
   }, []);
 
@@ -221,9 +210,7 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 버튼 누를 때 '구글 로그인 창으로 가는 중'이라고 브라우저에 기록을 남김
   const handleLogin = () => {
-    sessionStorage.setItem('isRedirecting', 'true');
     setIsAuthLoading(true);
     signInWithRedirect(auth, googleProvider);
   };
@@ -269,6 +256,7 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
+  // 로딩 화면 방어막
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
