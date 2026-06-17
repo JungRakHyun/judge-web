@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } from "firebase/auth";
 
 // 본인의 Firebase 프로젝트 설정값으로 교체하셔야 합니다.
 const firebaseConfig = {
@@ -20,4 +20,6 @@ export const db = getFirestore(app, "testweb");
 
 // 구글 로그인 인증 모듈 초기화
 export const auth = getAuth(app);
+setPersistence(auth, browserLocalPersistence);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
