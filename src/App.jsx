@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+// 💡 리디렉션 관련 함수를 빼고 팝업 함수로 원복합니다.
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -34,7 +35,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 파이어베이스 인증 상태 로딩 추가
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -51,7 +52,6 @@ export default function JudgeMapApp() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [editModalJudge, setEditModalJudge] = useState(null);
 
-  // 💡 무한 스크롤 상태 관리
   const [displayCount, setDisplayCount] = useState(10);
   const observer = useRef();
 
@@ -69,34 +69,29 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 💡 최적화된 인증 수명 주기 상태 관리
+  // 💡 [핵심] 인증 상태 무한 로딩 방지 (안전장치 추가)
   useEffect(() => {
-    // 1. 모바일 리디렉션 로그인 결과 확인 리스너
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          setUser(result.user);
-        }
-      })
-      .catch((error) => {
-        console.error("리디렉션 인증 실패 처리:", error);
-      });
+    // 3초 뒤에는 통신이 지연되더라도 강제로 로딩 화면을 종료합니다.
+    const fallbackTimer = setTimeout(() => {
+      setIsAuthLoading(false);
+    }, 3000);
 
-    // 2. 로그인 세션 유지상태 추적 리스너
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      clearTimeout(fallbackTimer); // 파이어베이스가 정상 응답하면 타이머 즉시 해제
       setUser(currentUser);
-      setIsAuthLoading(false); // 인증 프로세스 체크가 끝나면 로딩 해제
+      setIsAuthLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, []);
 
-  // 💡 검색어, 정렬, 탭, 지역이 바뀔 때마다 무한 스크롤 개수 초기화
   useEffect(() => {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-  // 💡 딥링킹(Deep Linking) 파싱 로직 추가
   useEffect(() => {
     if (judges.length > 0) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -112,23 +107,19 @@ export default function JudgeMapApp() {
     }
   }, [judges]);
   
-  // 💡 무한 스크롤 센서 (Intersection Observer)
   const lastElementRef = useCallback(node => {
     if (isLoadingData) return;
     if (observer.current) observer.current.disconnect();
     
     observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) {
-        setDisplayCount(prev => prev + 10);
-      }
+      if (entries[0].isIntersecting) setDisplayCount(prev => prev + 10);
     });
     
     if (node) observer.current.observe(node);
   }, [isLoadingData]);
 
   useEffect(() => {
-    // 인증 확인이 완전히 끝날 때까지 Firestore 스냅샷 요청 대기 (권한 거부 예방)
-    if (isAuthLoading) return;
+    if (isAuthLoading) return; // 로딩 중 데이터 호출 방지
 
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -188,13 +179,19 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 모바일 브라우저 팝업 차단 우회를 위해 리디렉션 로그인 적용
-  const handleLogin = async () => {
-    try { 
-      await signInWithRedirect(auth, googleProvider); 
-    } catch (error) { 
-      showToast("로그인창 이동에 실패했습니다.", "error"); 
-    }
+  // 💡 [핵심] 모바일 팝업 차단 우회 및 동기식 호출 (async 제거)
+  const handleLogin = () => {
+    signInWithPopup(auth, googleProvider)
+      .then(() => {
+        showToast("로그인 성공!");
+      })
+      .catch((error) => {
+        if (error.code === 'auth/popup-blocked') {
+          showToast("팝업이 차단되었습니다. 브라우저 설정에서 허용해주세요.", "error");
+        } else {
+          showToast("로그인 실패: " + error.message, "error");
+        }
+      });
   };
 
   const handleLogout = async () => {
@@ -225,7 +222,6 @@ export default function JudgeMapApp() {
     }
   };
 
-  // 데이터 필터링
   const regionJudges = selectedRegionName ? judges.filter(j => j.region === selectedRegionName) : [];
   let searchedJudges = judges.filter(j => j.name.includes(searchQuery) || j.court.includes(searchQuery) || j.region.includes(searchQuery));
   searchedJudges.sort((a, b) => {
@@ -239,7 +235,7 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  // 💡 스플래시 인디케이터나 세션 초기화 완료 처리 전까지 구조 대기
+  // 로딩 화면 표시
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
@@ -274,7 +270,6 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
-      {/* ==================== 1. 지도 탭 ==================== */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
@@ -326,7 +321,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -371,7 +365,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 3. 등록 탭 ==================== */}
       {currentTab === 'register' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
@@ -412,7 +405,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
           {!user ? (
@@ -482,11 +474,9 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 분리된 컴포넌트 호출 영역 */}
       {selectedJudge && <JudgeDetailModal judge={selectedJudge} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />}
       {editModalJudge && <AdminEditModal judge={editModalJudge} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
 
-      {/* 하단 4탭 네비게이션 */}
       <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
         <button onClick={() => setCurrentTab('map')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'map' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><MapIcon size={20} className="mb-1" /><span className="text-[9px] font-bold">지도 검색</span></button>
         <button onClick={() => setCurrentTab('search')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'search' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><Search size={20} className="mb-1" /><span className="text-[9px] font-bold">통합 검색</span></button>
