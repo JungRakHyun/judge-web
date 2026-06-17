@@ -33,7 +33,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); 
+  const [isAuthLoading, setIsAuthLoading] = useState(true); // 로딩 유지용
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -78,39 +78,37 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 구글에서 돌아온 결과를 처리하는 최종 로직
+  // 💡 [최종 완결판] 비동기 처리 순서를 강제로 고정하여 무한 루프 원천 차단
   useEffect(() => {
     let isMounted = true;
+    let unsubscribe;
 
-    const failsafeTimer = setTimeout(() => {
-      if (isMounted) setIsAuthLoading(false);
-    }, 3500);
-
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user && isMounted) showToast("로그인 성공!");
-      })
-      .catch((error) => console.error("로그인 에러:", error))
-      .finally(() => {
-        if (isMounted) {
-          setIsAuthLoading(false);
-          clearTimeout(failsafeTimer);
+    const initializeAuth = async () => {
+      try {
+        // 1단계: 구글에서 돌아왔다면, 파이어베이스가 티켓을 완전히 해독할 때까지 '기다림(await)'
+        // 여기서 1~2초가 걸리더라도 코드가 다음으로 넘어가지 않고 묵묵히 버팁니다.
+        const result = await getRedirectResult(auth);
+        if (result?.user && isMounted) {
+          showToast("로그인 성공!");
         }
-      });
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!isMounted) return;
-      setUser(currentUser);
-      if (currentUser) {
-        setIsAuthLoading(false);
-        clearTimeout(failsafeTimer);
+      } catch (error) {
+        console.error("리디렉션 에러:", error);
       }
-    });
+
+      // 2단계: 티켓 해독이 끝났음이 100% 보장된 시점에서만 유저 상태를 확인합니다.
+      if (isMounted) {
+        unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          setUser(currentUser);
+          setIsAuthLoading(false); // 🚨 모든 검증이 끝난 이 순간에 비로소 로딩 화면을 없앱니다!
+        });
+      }
+    };
+
+    initializeAuth();
 
     return () => {
       isMounted = false;
-      unsubscribe();
-      clearTimeout(failsafeTimer);
+      if (unsubscribe) unsubscribe();
     };
   }, []);
 
@@ -207,10 +205,7 @@ export default function JudgeMapApp() {
 
   const handleLogin = () => {
     setIsAuthLoading(true);
-    signInWithRedirect(auth, googleProvider).catch((error) => {
-      setIsAuthLoading(false);
-      alert("로그인 페이지 이동 중 오류가 발생했습니다: " + error.message);
-    });
+    signInWithRedirect(auth, googleProvider);
   };
 
   const handleLogout = async () => {
@@ -254,6 +249,7 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
+  // 데이터/인증 로딩 화면 방어막
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
