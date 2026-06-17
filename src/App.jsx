@@ -6,10 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 signInWithPopup 대신 리디렉션 관련 함수 임포트
 import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
-// 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
@@ -35,11 +33,10 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 인증 대기 상태 추가
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
-  
   const [isLoadingData, setIsLoadingData] = useState(true);
   
   const [selectedRegionName, setSelectedRegionName] = useState(null); 
@@ -53,6 +50,7 @@ export default function JudgeMapApp() {
   const [editModalJudge, setEditModalJudge] = useState(null);
 
   const [displayCount, setDisplayCount] = useState(10);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const observer = useRef();
 
   const [newJudge, setNewJudge] = useState({
@@ -69,22 +67,45 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 💡 [핵심] 로그인 결과 가로채기 및 인증 상태 동기화
+  // 가상 키보드 활성화 감지 및 팝업 메뉴 높이 조정
   useEffect(() => {
-    // 1. 구글 로그인 창에서 앱으로 돌아왔을 때 결과 처리
+    const handleResize = () => {
+      if (window.visualViewport) {
+        const diff = window.innerHeight - window.visualViewport.height;
+        setKeyboardOffset(diff > 50 ? diff * 0.8 : 0);
+      }
+    };
+    window.visualViewport?.addEventListener('resize', handleResize);
+    return () => window.visualViewport?.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 인증 상태 확인 및 무한 로딩 방지 로직
+  useEffect(() => {
+    let isMounted = true;
+
     getRedirectResult(auth).then((result) => {
-      if (result?.user) {
+      if (result?.user && isMounted) {
         showToast("로그인 성공!");
       }
-    }).catch(error => console.error("로그인 리디렉션 에러:", error));
+    }).catch(error => console.error("리디렉션 에러:", error));
 
-    // 2. 파이어베이스가 유저 상태를 완전히 확인할 때까지 로딩 유지
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) setIsAuthLoading(false);
+    }, 4000);
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthLoading(false); // 상태 확인 끝! 화면을 그려도 좋음
+      if (isMounted) {
+        clearTimeout(safetyTimer);
+        setUser(currentUser);
+        setIsAuthLoading(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -118,7 +139,6 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
-    // 💡 인증 확인이 끝나기 전에는 데이터를 부르지 않음 (권한 에러 방지)
     if (isAuthLoading) return;
 
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
@@ -139,7 +159,7 @@ export default function JudgeMapApp() {
       });
     }
     return () => { unsubJudges(); unsubReports(); };
-  }, [selectedJudge?.id, user?.uid, isAuthLoading]); // isAuthLoading 의존성 추가
+  }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
@@ -180,8 +200,11 @@ export default function JudgeMapApp() {
   }, [currentTab, showSplash]);
 
   const handleLogin = () => {
-    // 💡 모바일 브라우저 팝업 차단 회피를 위해 리디렉션 사용
-    signInWithRedirect(auth, googleProvider);
+    setIsAuthLoading(true);
+    signInWithRedirect(auth, googleProvider).catch(() => {
+      setIsAuthLoading(false);
+      showToast("로그인 이동 중 오류가 발생했습니다.", "error");
+    });
   };
 
   const handleLogout = async () => {
@@ -225,7 +248,6 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  // 💡 스플래시 화면 또는 인증 확인 중일 때 메인 화면 렌더링 방지
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
@@ -260,7 +282,6 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
-      {/* ==================== 1. 지도 탭 ==================== */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
@@ -271,7 +292,7 @@ export default function JudgeMapApp() {
 
           {selectedRegionName && !selectedJudge && (
             <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
-              <div className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh]">
+              <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
                   <button onClick={() => setSelectedRegionName(null)} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
@@ -312,7 +333,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -357,7 +377,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 3. 등록 탭 ==================== */}
       {currentTab === 'register' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
@@ -398,7 +417,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
           {!user ? (
@@ -468,11 +486,9 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 분리된 컴포넌트 호출 영역 */}
-      {selectedJudge && <JudgeDetailModal judge={selectedJudge} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />}
-      {editModalJudge && <AdminEditModal judge={editModalJudge} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
+      {selectedJudge && <JudgeDetailModal judge={selectedJudge} keyboardOffset={keyboardOffset} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />}
+      {editModalJudge && <AdminEditModal judge={editModalJudge} keyboardOffset={keyboardOffset} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
 
-      {/* 하단 4탭 네비게이션 */}
       <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
         <button onClick={() => setCurrentTab('map')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'map' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><MapIcon size={20} className="mb-1" /><span className="text-[9px] font-bold">지도 검색</span></button>
         <button onClick={() => setCurrentTab('search')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'search' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><Search size={20} className="mb-1" /><span className="text-[9px] font-bold">통합 검색</span></button>

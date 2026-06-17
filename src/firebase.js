@@ -5,7 +5,8 @@ import { getAuth, GoogleAuthProvider } from "firebase/auth";
 // 본인의 Firebase 프로젝트 설정값으로 교체하셔야 합니다.
 const firebaseConfig = {
   apiKey: "AIzaSyC2CcdqYPIoOLoWsxru8J8-l6wrJ00fq2M",
-  authDomain: "rakproject-bd9d1.firebaseapp.com",
+  // authDomain: "rakproject-bd9d1.firebaseapp.com",
+  authDomain: "judge-web-nu.vercel.app",
   databaseURL: "https://rakproject-bd9d1-default-rtdb.firebaseio.com",
   projectId: "rakproject-bd9d1",
   storageBucket: "rakproject-bd9d1.firebasestorage.app",
