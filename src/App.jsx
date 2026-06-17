@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 리디렉션으로 복구 (팝업은 브라우저가 강제 차단하므로 폐기)
 import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -34,7 +33,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); 
+  const [isAuthLoading, setIsAuthLoading] = useState(true); // 로딩 유지용
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -79,49 +78,46 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [핵심 해결] sessionStorage를 활용한 완벽한 로그인 타이밍 제어
+  // 💡 [최종 해결 방어막] 티켓 처리 전까지 절대 로딩 화면을 없애지 않음
   useEffect(() => {
     let isMounted = true;
-    // 우리가 구글 로그인 창으로 보냈던 것인지 기록을 확인합니다.
-    const isRedirecting = sessionStorage.getItem('isRedirecting') === 'true';
+    let isRedirectFinished = false; // 파이어베이스 티켓 검사 완료 여부
 
+    // 1. 백그라운드에서 구글 티켓 검사 (1~2초 소요됨)
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user && isMounted) showToast("로그인 성공!");
+      })
+      .catch((error) => console.error("로그인 에러:", error))
+      .finally(() => {
+        isRedirectFinished = true; // 티켓 검사 끝남!
+        
+        // 검사가 다 끝났는데도 유저가 없다면 그제서야 진짜 비로그인 처리 (로딩 해제)
+        if (isMounted && !auth.currentUser) {
+          setIsAuthLoading(false);
+        }
+      });
+
+    // 2. 유저 상태 감지
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!isMounted) return;
       setUser(currentUser);
       
       if (currentUser) {
-        // 1. 정상적으로 유저 정보가 들어온 경우
-        sessionStorage.removeItem('isRedirecting');
+        // 성공적으로 유저가 들어오면 로딩 해제
         setIsAuthLoading(false);
-      } else {
-        // 2. 유저 정보가 없을 때
-        if (isRedirecting) {
-          // 구글에서 막 돌아왔다면 파이어베이스가 티켓을 발급할 때까지 기다려줍니다.
-          getRedirectResult(auth)
-            .then((result) => {
-              if (result?.user) showToast("로그인 성공!");
-            })
-            .catch((error) => console.error("로그인 에러:", error))
-            .finally(() => {
-              if (isMounted) {
-                sessionStorage.removeItem('isRedirecting');
-                setIsAuthLoading(false); // 처리가 다 끝나면 비로소 로딩 해제
-              }
-            });
-        } else {
-          // 구글 로그인 기록이 없으면 일반 비로그인 유저이므로 바로 화면 표시
-          setIsAuthLoading(false);
-        }
+      } else if (isRedirectFinished) {
+        // 유저가 없고 티켓 검사도 이미 끝났다면 일반 방문자이므로 로딩 해제
+        setIsAuthLoading(false);
       }
+      // 🚨 만약 유저가 없는데 티켓 검사(isRedirectFinished)가 아직 안 끝났다면?
+      // -> 로딩 화면(setIsAuthLoading)을 끄지 않고 계속 기다림!! (이게 핵심)
     });
 
-    // 만약 통신이 끊겨서 영원히 로딩되는 것을 막기 위한 5초 안전 타이머
+    // 혹시라도 인터넷이 끊겨 영원히 로딩되는 걸 막는 10초 최후 안전장치
     const timer = setTimeout(() => {
-      if (isMounted) {
-        sessionStorage.removeItem('isRedirecting');
-        setIsAuthLoading(false);
-      }
-    }, 5000);
+      if (isMounted) setIsAuthLoading(false);
+    }, 10000);
 
     return () => {
       isMounted = false;
@@ -221,10 +217,8 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 버튼 누를 때 '구글 로그인 창으로 가는 중'이라고 브라우저에 기록을 남김
   const handleLogin = () => {
-    sessionStorage.setItem('isRedirecting', 'true');
-    setIsAuthLoading(true);
+    setIsAuthLoading(true); // 누르자마자 로딩 화면 띄움
     signInWithRedirect(auth, googleProvider);
   };
 
@@ -269,6 +263,7 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
+  // 데이터/인증 로딩 화면 방어막
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
@@ -303,7 +298,6 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
-      {/* ==================== 1. 지도 탭 ==================== */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
@@ -355,7 +349,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -400,7 +393,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 3. 등록 탭 ==================== */}
       {currentTab === 'register' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
@@ -441,7 +433,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
           {!user ? (
