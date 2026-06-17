@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 팝업 차단을 우회하는 리디렉션 함수로 완전히 교체
-import { signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+// 💡 리디렉션 싹 지우고 가장 안정적인 Popup 방식으로 복구
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 // 분리한 컴포넌트 임포트
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -35,7 +35,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 인증 로딩 상태
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -69,12 +69,11 @@ export default function JudgeMapApp() {
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
-  // 가상 키보드 활성화 감지 (모바일 레이아웃 최적화)
+  // 가상 키보드 최적화
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
         const diff = window.innerHeight - window.visualViewport.height;
-        // 키보드가 나올 땐 좀 많이 올려야 한다는 요청 반영
         setKeyboardOffset(diff > 50 ? diff * 0.8 : 0);
       }
     };
@@ -82,35 +81,13 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [핵심] 리디렉션 로그인 유지 및 무한 로딩 방지 (3초 타이머)
+  // 💡 심플하고 강력한 인증 상태 복구 (타이머 전부 제거)
   useEffect(() => {
-    let isMounted = true;
-
-    // 리디렉션으로 돌아왔을 때 로그인 결과 낚아채기
-    getRedirectResult(auth).then((result) => {
-      if (result?.user && isMounted) {
-        showToast("로그인 성공!");
-      }
-    }).catch(error => console.error("리디렉션 에러:", error));
-
-    // 혹시라도 통신이 꼬이면 3초 뒤 강제로 메인 화면 표시
-    const safetyTimer = setTimeout(() => {
-      if (isMounted) setIsAuthLoading(false);
-    }, 3000);
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) {
-        clearTimeout(safetyTimer); // 파이어베이스 응답 시 타이머 취소
-        setUser(currentUser);
-        setIsAuthLoading(false);
-      }
+      setUser(currentUser);
+      setIsAuthLoading(false);
     });
-
-    return () => {
-      isMounted = false;
-      clearTimeout(safetyTimer);
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -144,7 +121,7 @@ export default function JudgeMapApp() {
   }, [isLoadingData]);
 
   useEffect(() => {
-    if (isAuthLoading) return; // 인증 정보 확인 전엔 데이터 요청 대기
+    if (isAuthLoading) return;
 
     const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -204,13 +181,21 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 팝업 차단을 원천 봉쇄하기 위해 무조건 페이지를 이동시키는 리디렉션 로그인
+  // 💡 [핵심 해결] 팝업 차단 방지 로직 (상태 업데이트 제거)
   const handleLogin = () => {
-    setIsAuthLoading(true); // 버튼 클릭 시 즉시 로딩 처리
-    signInWithRedirect(auth, googleProvider).catch((error) => {
-      setIsAuthLoading(false);
-      showToast("로그인 창 이동 실패", "error");
-    });
+    // 🚨 절대 이 부분에 setIsAuthLoading(true) 같은 상태 변경 코드를 넣으면 안 됩니다! (브라우저가 팝업을 차단함)
+    signInWithPopup(auth, googleProvider)
+      .then((result) => {
+        showToast("로그인 성공!");
+        setUser(result.user);
+      })
+      .catch((error) => {
+        if (error.code === 'auth/popup-blocked') {
+          showToast("팝업이 차단되었습니다. 브라우저 설정에서 허용해주세요.", "error");
+        } else {
+          showToast("로그인 실패: " + error.message, "error");
+        }
+      });
   };
 
   const handleLogout = async () => {
@@ -254,7 +239,6 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  // 로딩 인디케이터 방어 로직
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
