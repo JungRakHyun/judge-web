@@ -58,22 +58,22 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
 
   // 💡 수정된 뒤로가기 방어 로직
   // JudgeDetailModal.jsx 내부 useEffect
-  // useEffect(() => {
-  //   // 모달이 열리면 히스토리 하나 추가
-  //   window.history.pushState({ modalOpen: true }, '');
+  useEffect(() => {
+    // 모달이 열리면 히스토리 하나 추가
+    window.history.pushState({ modalOpen: true }, '');
 
-  //   const handlePopState = () => {
-  //     onClose(); // 뒤로가기 누르면 닫기 함수만 호출
-  //   };
+    const handlePopState = () => {
+      onClose(); // 뒤로가기 누르면 닫기 함수만 호출
+    };
 
-  //   window.addEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handlePopState);
 
-  //   return () => {
-  //     window.removeEventListener('popstate', handlePopState);
-  //     // 여기서 back()을 호출하면 닫힐 때 화면이 반짝입니다. 
-  //     // 히스토리 제어는 아까 1번 과정(onClose)에서만 처리하세요.
-  //   };
-  // }, [onClose]);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      // 여기서 back()을 호출하면 닫힐 때 화면이 반짝입니다. 
+      // 히스토리 제어는 아까 1번 과정(onClose)에서만 처리하세요.
+    };
+  }, [onClose]);
 
   const toggleBookmark = async () => {
     if (!user) return showToast("즐겨찾기를 하려면 먼저 로그인해주세요.", "error");

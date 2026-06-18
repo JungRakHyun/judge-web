@@ -123,38 +123,41 @@ export default function JudgeMapApp() {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastBackPress, setLastBackPress] = useState(0);
 
-  // JudgeMapApp.jsx의 handleMainBackPress 수정
+  // 뒤로가기 로직 (완전 대체)
   useEffect(() => {
+    // 1. 앱 진입 시 히스토리 스택을 하나 강제로 쌓음 (뒤로가기 버튼 활성화용)
+    window.history.pushState(null, '', window.location.href);
+
     const handleMainBackPress = (e) => {
-      // 💡 브라우저의 기본 뒤로가기 동작 방지 (매우 중요)
-      e.preventDefault();
-      
-      // 1. 상세화면이 떠있으면 상세화면 닫기 (상태만 null로 변경)
+      // 2. 상세페이지 닫기
       if (selectedJudge) {
         setSelectedJudge(null);
+        window.history.pushState(null, '', window.location.href); // 닫은 후 다시 스택 보충
         return;
       }
-
-      // 2. 판사 리스트가 떠있으면 리스트 닫기 (상태만 null로 변경)
+      
+      // 3. 리스트 닫기
       if (selectedRegionName) {
         setSelectedRegionName(null);
+        window.history.pushState(null, '', window.location.href); // 닫은 후 다시 스택 보충
         return;
       }
 
-      // 3. 지도 메인 화면일 때만 종료 로직
+      // 4. 메인 화면에서 2초 내 두 번 누르면 종료 처리
       const now = Date.now();
       if (now - lastBackPress < 2000) {
-        // window.close();
-        // window.history.back();
+        // 실제 앱 종료를 유도하는 방법
+        window.history.back(); // 스택을 뒤로 보내서 종료 유도
       } else {
         setLastBackPress(now);
         showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+        window.history.pushState(null, '', window.location.href); // 경고 후 다시 스택 보충
       }
     };
 
     window.addEventListener('popstate', handleMainBackPress);
     return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge, selectedRegionName]); // 💡 의존성 추가
+  }, [lastBackPress, selectedJudge, selectedRegionName]);
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
@@ -360,7 +363,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.05</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.06</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {/* 💡 [임시] 데이터 업로드용 버튼 */}
