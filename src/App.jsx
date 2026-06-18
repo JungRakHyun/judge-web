@@ -549,7 +549,26 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {selectedJudge && <JudgeDetailModal judge={selectedJudge} keyboardOffset={keyboardOffset} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />}
+      {/* {selectedJudge && <JudgeDetailModal judge={selectedJudge} keyboardOffset={keyboardOffset} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />} */}
+      {selectedJudge && (
+        <JudgeDetailModal 
+          key={selectedJudge.id} 
+          judge={selectedJudge} 
+          keyboardOffset={keyboardOffset} 
+          allJudges={judges} 
+          user={user} 
+          onClose={() => {
+            // 💡 모달 닫을 때 히스토리 스택 하나를 확실히 제거하고 상태를 비움
+            if (window.history.state?.modalOpen) {
+              window.history.back();
+            }
+            setSelectedJudge(null);
+          }} 
+          showToast={showToast} 
+          currentTab={currentTab} 
+          selectedRegionName={selectedRegionName} 
+        />
+      )}
       {editModalJudge && <AdminEditModal judge={editModalJudge} keyboardOffset={keyboardOffset} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
 
       <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
