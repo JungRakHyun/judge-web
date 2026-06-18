@@ -333,7 +333,7 @@ export default function JudgeMapApp() {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
         <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
-        <h1 className="text-white font-extrabold text-3xl tracking-tight leading-tight mb-2">JUDGE MAP</h1>
+        <h1 className="text-white font-extrabold text-3xl tracking-tight leading-tight mb-2">JUDGE MAP V1.01</h1>
         <p className="text-slate-400 text-xs font-bold tracking-widest">법관 통합 정보 생태계</p>
       </div>
     );
