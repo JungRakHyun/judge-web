@@ -16,10 +16,14 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   const [isKeyboardActive, setIsKeyboardActive] = useState(false);
   const [reportModalReview, setReportModalReview] = useState(null);
 
+  // 리뷰/답글 수정 및 작성용 상태 관리
   const [editingReview, setEditingReview] = useState(null); 
   const [replyingTo, setReplyingTo] = useState(null); 
   const [replyText, setReplyText] = useState("");
   const [editingReply, setEditingReply] = useState(null); 
+
+  // 💡 사용자가 현재 메인 리뷰 작성이 아닌 다른 입력창(답글 작성, 수정 등)을 켰는지 여부 감지
+  const isUserActiveOnOtherInput = replyingTo !== null || editingReview !== null || editingReply !== null;
 
   const chartData = [
     { name: '원고 승소', value: judge?.win_rate || 33, itemStyle: { color: '#3B82F6' } },
@@ -72,11 +76,8 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     }
   };
 
-  // 💡 AI 요약 업데이트 함수 (조건을 1건 이상으로 변경)
   const updateAISummaryIfNeeded = async (currentReviews) => {
     const validReviews = currentReviews.filter(r => r && r.comment);
-    
-    // 🚨 기존 3건 이상에서 1건 이상(>= 1)으로 기준 하향 조절
     if (validReviews.length >= 1) {
       const ACTUAL_GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY; 
       if (!ACTUAL_GEMINI_API_KEY) return;
@@ -92,7 +93,6 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
         }
       } catch (error) { console.error("AI 요약 실패", error); }
     } else {
-      // 만약 리뷰를 삭제해서 0건이 되었다면 AI 요약도 비워줍니다.
       await updateDoc(doc(db, "judges", judge.id), { ai_summary: "" });
     }
   };
@@ -201,6 +201,15 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
       setEditingReply(null); setIsKeyboardActive(false);
       showToast("답글이 수정되었습니다.");
     } catch (e) { showToast("답글 수정 실패", "error"); }
+  };
+
+  // 모든 서브 입력 액션 일괄 취소 처리 함수
+  const handleCancelSubInputs = () => {
+    setReplyingTo(null);
+    setEditingReview(null);
+    setEditingReply(null);
+    setReplyText("");
+    setIsKeyboardActive(false);
   };
 
   return (
@@ -380,12 +389,29 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
             </div>
           </div>
 
+          {/* 💡 [UX 개선 핵심 영역] 다른 곳 입력 중일 때 최하단 메인 폼 스위칭 */}
           <div className={`p-4 pt-3 bg-white border-t border-slate-100 shrink-0 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] transition-all duration-300 ${isKeyboardActive ? 'pb-[35vh]' : 'pb-4'}`}>
-            {!user ? (
+            {isUserActiveOnOtherInput ? (
+              // 💡 다른창 입력중일 때 띄워줄 안내 가이드바 (화면 공간 확보 및 레이아웃 패딩 유지)
+              <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200/80 animate-fade-in">
+                <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                  {replyingTo && "💬 리뷰에 답글을 작성하고 있습니다."}
+                  {editingReview && "✍️ 내가 쓴 리뷰를 수정하고 있습니다."}
+                  {editingReply && "✍️ 내가 쓴 답글을 수정하고 있습니다."}
+                </p>
+                <button 
+                  onClick={handleCancelSubInputs}
+                  className="text-[11px] font-extrabold bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-300 transition-colors whitespace-nowrap"
+                >
+                  작성 취소
+                </button>
+              </div>
+            ) : !user ? (
               <div className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-[13px] font-bold text-slate-600 mb-2">리뷰를 작성하려면 로그인이 필요합니다.</p>
               </div>
             ) : (
+              // 기존 메인 리뷰 작성 창 (평상시에만 활성화)
               <>
                 <div className="flex items-center gap-1 mb-2 px-1">
                   <span className="text-[11px] font-bold text-slate-500 mr-2">별점:</span>
