@@ -123,18 +123,22 @@ export default function JudgeMapApp() {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastBackPress, setLastBackPress] = useState(0);
 
+  // JudgeMapApp.jsx의 handleMainBackPress 수정
   useEffect(() => {
     const handleMainBackPress = (e) => {
-      // 1. 상세페이지가 열려있거나 화면 전환 중이면 종료 로직 건너뜀
-      if (selectedJudge || isTransitioning) return;
-
-      // 2. 판사 리스트가 열려있다면(지역 선택된 상태)
-      if (selectedRegionName) {
-        setSelectedRegionName(null); // 💡 리스트만 닫음
+      // 1. 상세화면이 떠있으면 상세화면 닫기 (상태만 null로 변경)
+      if (selectedJudge) {
+        setSelectedJudge(null);
         return;
       }
 
-      // 3. 완전히 지도 화면일 때만 종료 로직 작동
+      // 2. 판사 리스트가 떠있으면 리스트 닫기 (상태만 null로 변경)
+      if (selectedRegionName) {
+        setSelectedRegionName(null);
+        return;
+      }
+
+      // 3. 지도 메인 화면일 때만 종료 로직
       const now = Date.now();
       if (now - lastBackPress < 2000) {
         window.close();
@@ -146,7 +150,7 @@ export default function JudgeMapApp() {
 
     window.addEventListener('popstate', handleMainBackPress);
     return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge, isTransitioning, selectedRegionName]); // 💡 selectedRegionName 의존성 추가
+  }, [lastBackPress, selectedJudge, selectedRegionName]); // 💡 의존성 추가
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
@@ -333,7 +337,7 @@ export default function JudgeMapApp() {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
         <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
-        <h1 className="text-white font-extrabold text-3xl tracking-tight leading-tight mb-2">JUDGE MAP V1.01</h1>
+        <h1 className="text-white font-extrabold text-3xl tracking-tight leading-tight mb-2">JUDGE MAP</h1>
         <p className="text-slate-400 text-xs font-bold tracking-widest">법관 통합 정보 생태계</p>
       </div>
     );
@@ -352,7 +356,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.02</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {/* 💡 [임시] 데이터 업로드용 버튼 */}
@@ -586,22 +590,7 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          onClose={() => {
-            setIsTransitioning(true); 
-            
-            // 모달 닫기 시 히스토리 이동
-            if (window.history.state?.modalOpen) {
-              window.history.back();
-            }
-            
-            // 💡 중요: 상세화면 닫히고 리스트 화면으로 돌아올 때 
-            // 메인 화면의 popstate 로직이 겹쳐서 실행되지 않도록 
-            // setTimeout을 조금 더 넉넉하게 줍니다.
-            setTimeout(() => {
-              setSelectedJudge(null);
-              setIsTransitioning(false);
-            }, 300);
-          }}
+          onClose={() => setSelectedJudge(null)}
           showToast={showToast} 
           currentTab={currentTab} 
           selectedRegionName={selectedRegionName} 
