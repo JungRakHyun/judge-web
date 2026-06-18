@@ -385,7 +385,7 @@ export default function JudgeMapApp() {
 
       {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
-        <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50">
+        <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50 h-[100dvh] overflow-hidden">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
             <div className="relative mb-3">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
@@ -397,7 +397,7 @@ export default function JudgeMapApp() {
               <button onClick={() => setSortOption('reviews')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'reviews' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>💬 리뷰많은순</button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar touch-auto">
             {isLoadingData ? (
               <div className="flex flex-col gap-3 pb-6">
                 {[1, 2, 3, 4, 5].map(i => <JudgeSkeletonCard key={i} />)}
