@@ -13,7 +13,7 @@ import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
 
-// 데이터 패칭 전 표시할 스켈레톤 컴포넌트
+// 데이터 패칭 지연 시 노출할 스켈레톤 컴포넌트
 const JudgeSkeletonCard = () => (
   <div className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm animate-pulse">
     <div className="space-y-3">
@@ -33,25 +33,31 @@ const JudgeSkeletonCard = () => (
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
   
-  // 세션 스토리지 기반 UI 상태 유지
+  // 세션 스토리지를 활용한 앱 상태 유지 (백그라운드 전환 대응)
   const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
   const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
   
+  // popstate 이벤트에서 최신 상태를 참조하기 위한 Ref 바인딩
   const currentTabRef = useRef(currentTab);
   useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
   
-  // 글로벌 데이터 상태
+  // 사용자 및 전역 데이터 상태
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
   const [isLoadingData, setIsLoadingData] = useState(true);
   
-  // 모달 및 리스트 트리거 상태
+  // UI 렌더링 트리거 상태
   const [selectedRegionName, setSelectedRegionName] = useState(null); 
+  const selectedRegionRef = useRef(selectedRegionName);
+  useEffect(() => { selectedRegionRef.current = selectedRegionName; }, [selectedRegionName]);
+
   const [selectedJudge, setSelectedJudge] = useState(null); 
+  const selectedJudgeRef = useRef(selectedJudge);
+  useEffect(() => { selectedJudgeRef.current = selectedJudge; }, [selectedJudge]);
   
-  // 로컬 폼 및 UI 상태
+  // 로컬 UI 상태
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState("latest"); 
   const [mapStatus, setMapStatus] = useState("loading");
@@ -59,18 +65,17 @@ export default function JudgeMapApp() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [editModalJudge, setEditModalJudge] = useState(null);
 
-  // 인피니트 스크롤 제어 상태
+  // 무한 스크롤 및 레이아웃 관련 상태
   const [displayCount, setDisplayCount] = useState(10);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const observer = useRef();
 
-  // 신규 등록 객체 초기화
+  // 폼 초기값
   const [newJudge, setNewJudge] = useState({
     name: '', title: '판사', region: '서울', court: '', department: '', career: '', ai_summary: '',
     win_rate: 45, lose_rate: 35, draw_rate: 20
   });
 
-  // 토스트 메시지 핸들러
   const showToast = (message, type = 'success') => {
     setToast({ show: true, message, type });
     setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 2500);
@@ -78,11 +83,11 @@ export default function JudgeMapApp() {
 
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
-  // SPA 뒤로가기(popstate) 라우팅 제어 로직 (07버전 원복)
-  const [lastBackPress, setLastBackPress] = useState(0);
+  // SPA History API 라우팅 제어 (뒤로가기 동기화)
+  const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // History API 초기 스택 삽입
+    // 앱 진입 시 물리버튼 강제 종료를 막기 위한 더미 스택 푸시
     if (!window.history.state || !window.history.state.step) {
       window.history.replaceState({ step: 'exit_trap' }, '');
       window.history.pushState({ step: 'main' }, '');
@@ -93,36 +98,42 @@ export default function JudgeMapApp() {
       if (!state) return;
 
       if (state.step === 'exit_trap') {
+        // 메인 베이스 화면에서 뒤로가기 발생 시
         if (currentTabRef.current !== 'map') {
+          // 타 탭에 있을 경우 지도 탭으로 라우팅 처리
           setCurrentTab('map');
           window.history.pushState({ step: 'main' }, '');
         } else {
+          // 지도 탭일 경우 2초 제한 종료 로직 실행
           const now = Date.now();
-          if (now - lastBackPress < 2000) {
+          if (now - lastBackPressRef.current < 2000) {
             window.history.back(); 
           } else {
-            setLastBackPress(now);
+            lastBackPressRef.current = now;
             showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-            window.history.pushState({ step: 'main' }, '');
+            window.history.pushState({ step: 'main' }, ''); 
             
-            setSelectedRegionName(null);
-            setSelectedJudge(null);
+            // 상태 꼬임 방지를 위한 초기화
+            if (selectedRegionRef.current) setSelectedRegionName(null);
+            if (selectedJudgeRef.current) setSelectedJudge(null);
           }
         }
       } else if (state.step === 'main') {
-        setSelectedRegionName(null);
-        setSelectedJudge(null);
+        // 지역 모달이나 상세 팝업이 닫히고 메인으로 돌아왔을 때
+        if (selectedRegionRef.current) setSelectedRegionName(null);
+        if (selectedJudgeRef.current) setSelectedJudge(null);
       } else if (state.step === 'region') {
+        // 상세 팝업만 닫히고 지역 리스트로 돌아왔을 때
         setSelectedRegionName(state.region);
-        setSelectedJudge(null);
+        if (selectedJudgeRef.current) setSelectedJudge(null);
       }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [selectedJudge, selectedRegionName, lastBackPress]);
+  }, []); 
 
-  // 스플래시 화면 타이머
+  // 스플래시 노출 제어
   useEffect(() => { 
     if (showSplash) {
       setTimeout(() => {
@@ -132,12 +143,12 @@ export default function JudgeMapApp() {
     }
   }, [showSplash]);
 
-  // 활성 탭 세션 동기화
+  // 탭 변경 세션 동기화
   useEffect(() => {
     sessionStorage.setItem('currentTab', currentTab);
   }, [currentTab]);
 
-  // 가상 키보드 리사이징 대응
+  // 모바일 가상 키보드 리사이징 대응
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -149,7 +160,7 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // Auth 구독
+  // Auth 상태 구독
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -158,12 +169,12 @@ export default function JudgeMapApp() {
     return () => unsubscribe();
   }, []);
 
-  // 필터 초기화
+  // 정렬 조건 변경 시 노출 개수 초기화
   useEffect(() => {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-  // 외부 링크 유입 시 파라미터 파싱
+  // 직링크(Query Parameter) 접속 시 타겟 판사 상세 모달 로드
   useEffect(() => {
     if (judges.length > 0) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -180,7 +191,7 @@ export default function JudgeMapApp() {
     }
   }, [judges]);
   
-  // 무한 스크롤 Observer
+  // 무한 스크롤 옵저버
   const lastElementRef = useCallback(node => {
     if (isLoadingData) return;
     if (observer.current) observer.current.disconnect();
@@ -192,7 +203,7 @@ export default function JudgeMapApp() {
     if (node) observer.current.observe(node);
   }, [isLoadingData]);
 
-  // Firestore 구독
+  // Firestore 데이터 실시간 구독
   useEffect(() => {
     if (isAuthLoading) return;
 
@@ -201,6 +212,7 @@ export default function JudgeMapApp() {
       setJudges(data);
       setIsLoadingData(false); 
       
+      // 모달 활성화 상태에서 데이터 변경 시 실시간 반영
       if (selectedJudge) {
         const updated = data.find(j => j.id === selectedJudge.id);
         if (updated) setSelectedJudge(updated);
@@ -216,7 +228,7 @@ export default function JudgeMapApp() {
     return () => { unsubJudges(); unsubReports(); };
   }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
-  // ECharts 초기화
+  // ECharts 렌더링 및 모바일 줌 감도 튜닝
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
     
@@ -232,14 +244,10 @@ export default function JudgeMapApp() {
             myChart = echarts.init(mapRef.current);
             echarts.registerMap('korea', geoJson);
             myChart.setOption({
-              // 터치 및 드래그 애니메이션 부드러운 전환 처리
-              animationDurationUpdate: 300,
-              animationEasingUpdate: 'cubicInOut',
               tooltip: { show: false },
               series: [{
-                type: 'map', map: 'korea', 
-                roam: true,
-                // 지도 스케일 한계 설정 (민감도 최적화)
+                type: 'map', map: 'korea', roam: true, 
+                // 모바일 터치 줌 민감도 제한 (과도한 줌인/줌아웃 방지)
                 scaleLimit: { min: 1.45, max: 3.5 }, 
                 zoom: 1.45, center: [127.7, 36.3], selectedMode: 'single',
                 label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#94a3b8', formatter: (params) => regionMapping[params.name] || params.name },
@@ -268,7 +276,6 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // Google OAuth 처리
   const handleLogin = () => {
     signInWithPopup(auth, googleProvider)
       .then((result) => {
@@ -277,7 +284,7 @@ export default function JudgeMapApp() {
       })
       .catch((error) => {
         if (error.code === 'auth/popup-blocked') {
-          alert("팝업이 차단되었습니다. 외부 브라우저(크롬/사파리 등)를 이용해주세요.");
+          alert("팝업이 차단되었습니다. 사파리/크롬 등 일반 브라우저를 사용해주세요.");
         } else if (error.code !== 'auth/popup-closed-by-user') {
           alert("로그인 실패: " + error.message);
         }
@@ -290,7 +297,6 @@ export default function JudgeMapApp() {
     }
   };
 
-  // 폼 제출 프로세스 핸들러
   const handleRegisterJudge = async () => {
     if (!user) return showToast("데이터를 등록하려면 먼저 로그인해주세요.", "error");
     if (!newJudge.name || !newJudge.court) return showToast("이름과 소속 법원은 필수입니다.", "error");
@@ -306,7 +312,6 @@ export default function JudgeMapApp() {
     } catch (error) { showToast(`등록 실패`, "error"); } finally { setIsSubmitting(false); }
   };
 
-  // 문서 삭제 프로세스
   const handleDeleteJudge = async (judgeId, judgeName) => {
     if (window.confirm(`정말 ${judgeName} 판사 데이터를 영구 삭제하시겠습니까?`)) {
       try { await deleteDoc(doc(db, "judges", judgeId)); showToast("데이터가 삭제되었습니다."); } 
@@ -314,7 +319,6 @@ export default function JudgeMapApp() {
     }
   };
 
-  // 렌더링용 데이터 정렬 및 맵핑
   const regionJudges = selectedRegionName ? judges.filter(j => j.region === selectedRegionName) : [];
   let searchedJudges = judges.filter(j => j.name.includes(searchQuery) || j.court.includes(searchQuery) || j.region.includes(searchQuery));
   searchedJudges.sort((a, b) => {
@@ -328,7 +332,6 @@ export default function JudgeMapApp() {
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
 
-  // 스플래시 UI
   if (showSplash || isAuthLoading) {
     return (
       <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
@@ -342,7 +345,6 @@ export default function JudgeMapApp() {
   return (
     <div className="relative w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center overflow-hidden select-none pb-[60px]">
       
-      {/* Toast Notification */}
       <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] transition-all duration-300 pointer-events-none ${toast.show ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
         <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl shadow-xl border ${toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-800 border-slate-700 text-white'}`}>
           {toast.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle2 size={18} className="text-emerald-400" />}
@@ -353,7 +355,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.09</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.07</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
@@ -364,27 +366,28 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
-      {/* 탭: Map */}
+      {/* 맵핑 컨테이너 */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
             {mapStatus === "loading" && <p className="text-blue-400 text-sm font-bold animate-pulse absolute z-0">지도를 불러오는 중...</p>}
-            {/* 이벤트 버블링 차단 영역 */}
             <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
           </div>
           <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-300 px-4 py-1.5 rounded-full text-[11px] font-bold pointer-events-none shadow-lg whitespace-nowrap">지역을 터치하거나 줌인하세요</div>
 
-          {/* 지역 하위 뷰 모달 */}
+          {/* 지역 리스트 바텀시트 */}
           {selectedRegionName && !selectedJudge && (
             <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
               <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
+                  {/* 컴포넌트 마운트 해제 대신 history API 활용 */}
                   <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
                 </div>
                 
-                {/* overscroll 설정으로 네이티브 스크롤 바운스 구현 */}
+                {/* overscroll-y-contain 할당으로 모바일 스크롤 바운싱 효과 구현 */}
                 <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar overscroll-y-contain">
+                  {/* 스크롤 영역 강제 할당 (100% + 1px) */}
                   <div className="min-h-[calc(100%+1px)] flex flex-col gap-3">
                     {isLoadingData ? (
                       <>
@@ -424,7 +427,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 탭: Search */}
+      {/* 검색 컨테이너 */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50 h-[100dvh] overflow-hidden">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -473,7 +476,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 탭: Register */}
+      {/* 등록 컨테이너 */}
       {currentTab === 'register' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50 overscroll-y-contain">
           <div className="min-h-[calc(100%+1px)]">
@@ -516,7 +519,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 탭: Mypage */}
+      {/* 마이페이지 컨테이너 */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar overscroll-y-contain">
           <div className="min-h-[calc(100%+1px)]">
@@ -594,7 +597,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 모달 렌더링 영역 */}
       {selectedJudge && (
         <JudgeDetailModal 
           key={selectedJudge.id} 
@@ -602,7 +604,6 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          // 닫기 액션을 history.back()으로 통일하여 스택 싱크 관리
           onClose={() => window.history.back()}
           showToast={showToast} 
           currentTab={currentTab} 
@@ -612,7 +613,6 @@ export default function JudgeMapApp() {
       
       {editModalJudge && <AdminEditModal judge={editModalJudge} keyboardOffset={keyboardOffset} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
 
-      {/* Global Navigation Bar */}
       <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
         <button onClick={() => setCurrentTab('map')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'map' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><MapIcon size={20} className="mb-1" /><span className="text-[9px] font-bold">지도 검색</span></button>
         <button onClick={() => setCurrentTab('search')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'search' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><Search size={20} className="mb-1" /><span className="text-[9px] font-bold">통합 검색</span></button>
