@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 리디렉션 삭제. 빠르고 확실한 팝업(Popup)으로 완전 복구
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
@@ -31,64 +30,13 @@ const JudgeSkeletonCard = () => (
 
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
-
-  // 💡 [임시] 테스트용 랜덤 판사 데이터 20명 일괄 업로드 함수
-// const uploadDummyData = async () => {
-//   if (!window.confirm("20명의 랜덤 판사 데이터를 파이어베이스에 업로드하시겠습니까?")) return;
   
-//   const lastNames = ["김", "이", "박", "최", "정", "강", "조", "윤", "장", "임"];
-//   const firstNames = ["민준", "서연", "도윤", "서현", "하준", "민서", "준우", "서윤", "지훈", "윤서"];
-//   const regions = ["서울", "경기/인천", "강원", "충북", "대전/충남", "전북", "광주/전남", "대구/경북", "부산/경남", "제주"];
-//   const courts = ["서울중앙지법", "수원지법", "춘천지법", "청주지법", "대전지법", "전주지법", "광주지법", "대구지법", "부산지법", "제주지법"];
-//   const departments = ["형사1부", "민사2부", "가사3부", "행정4부", "형사 단독", "민사 단독"];
-//   const careers = ["사법연수원 33기", "사법연수원 35기", "사법연수원 38기", "변호사시험 3회", "변호사시험 5회"];
-
-//   try {
-//     const { collection, addDoc } = await import("firebase/firestore");
-    
-//     for (let i = 0; i < 20; i++) {
-//       // 랜덤 이름 및 소속 조합
-//       const name = lastNames[Math.floor(Math.random() * lastNames.length)] + firstNames[Math.floor(Math.random() * firstNames.length)];
-//       const regionIdx = Math.floor(Math.random() * regions.length);
-//       const region = regions[regionIdx];
-//       const court = courts[regionIdx]; // 지역과 법원 싱크 맞춤
-//       const department = departments[Math.floor(Math.random() * departments.length)];
-//       const career = careers[Math.floor(Math.random() * careers.length)];
-      
-//       // 랜덤 판결 비율 계산 (합계가 100이 되도록 조절)
-//       const win_rate = Math.floor(Math.random() * 40) + 30; // 30% ~ 70%
-//       const lose_rate = Math.floor(Math.random() * (90 - win_rate)) + 10;
-//       const draw_rate = 100 - win_rate - lose_rate;
-
-//       const dummyJudge = {
-//         name,
-//         title: Math.random() > 0.7 ? "부장판사" : "판사",
-//         region,
-//         court,
-//         department,
-//         career,
-//         win_rate,
-//         lose_rate,
-//         draw_rate,
-//         reviews: [],
-//         bookmarkedUsers: [],
-//         ai_summary: ""
-//       };
-
-//       await addDoc(collection(db, "judges"), dummyJudge);
-//     }
-    
-//     alert("🎉 랜덤 판사 데이터 20건이 성공적으로 파이어베이스에 등록되었습니다! 화면을 새로고침 하세요.");
-//   } catch (error) {
-//     console.error("데이터 업로드 에러:", error);
-//     alert("데이터 업로드 실패: " + error.message);
-//   }
-// };
+  // 💡 앱 상태 유지 로직: 세션 스토리지를 이용해 나갔다 들어와도 로딩창을 건너뛰고 탭을 유지함
+  const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
+  const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
   
-  const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true); 
-  const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
   const [isLoadingData, setIsLoadingData] = useState(true);
@@ -119,47 +67,69 @@ export default function JudgeMapApp() {
 
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
-  // 💡 [추가] 메인 화면 뒤로가기 2번 로직
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  // =====================================================================
+  // 💡 [핵심] 뒤로가기 3단계 완벽 제어 및 앱 종료 로직
+  // =====================================================================
   const [lastBackPress, setLastBackPress] = useState(0);
 
-  // 뒤로가기 로직 (완전 대체)
+  // 1. 앱 초기 실행 시 (지도 화면용 스택)
   useEffect(() => {
-    // 1. 앱 진입 시 히스토리 스택을 하나 강제로 쌓음 (뒤로가기 버튼 활성화용)
-    window.history.pushState(null, '', window.location.href);
+    window.history.pushState({ page: 'main' }, '');
+  }, []);
 
-    const handleMainBackPress = (e) => {
-      // 2. 상세페이지 닫기
+  // 2. 지역 선택 시 스택 추가
+  useEffect(() => {
+    if (selectedRegionName && !selectedJudge) {
+      window.history.pushState({ page: 'region' }, '');
+    }
+  }, [selectedRegionName]);
+
+  // 3. 판사 선택 시 스택 추가
+  useEffect(() => {
+    if (selectedJudge) {
+      window.history.pushState({ page: 'judge' }, '');
+    }
+  }, [selectedJudge]);
+
+  // 4. 뒤로가기 감지 시 상태 해제
+  useEffect(() => {
+    const handlePopState = (e) => {
       if (selectedJudge) {
-        setSelectedJudge(null);
-        window.history.pushState(null, '', window.location.href); // 닫은 후 다시 스택 보충
-        return;
-      }
-      
-      // 3. 리스트 닫기
-      if (selectedRegionName) {
-        setSelectedRegionName(null);
-        window.history.pushState(null, '', window.location.href); // 닫은 후 다시 스택 보충
-        return;
-      }
-
-      // 4. 메인 화면에서 2초 내 두 번 누르면 종료 처리
-      const now = Date.now();
-      if (now - lastBackPress < 2000) {
-        // 실제 앱 종료를 유도하는 방법
-        window.history.back(); // 스택을 뒤로 보내서 종료 유도
+        setSelectedJudge(null); // 판사 상세 닫기
+      } else if (selectedRegionName) {
+        setSelectedRegionName(null); // 지역 리스트 닫기
       } else {
-        setLastBackPress(now);
-        showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-        window.history.pushState(null, '', window.location.href); // 경고 후 다시 스택 보충
+        // 메인 지도 화면일 때 종료 로직 작동
+        const now = Date.now();
+        if (now - lastBackPress < 2000) {
+          window.close(); // 앱 종료
+        } else {
+          setLastBackPress(now);
+          showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+          window.history.pushState({ page: 'main' }, ''); // 튕김 방지용 스택 재충전
+        }
       }
     };
 
-    window.addEventListener('popstate', handleMainBackPress);
-    return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge, selectedRegionName]);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectedJudge, selectedRegionName, lastBackPress]);
+  // =====================================================================
 
-  useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
+  // 스플래시 화면 타이머
+  useEffect(() => { 
+    if (showSplash) {
+      setTimeout(() => {
+        setShowSplash(false);
+        sessionStorage.setItem('splashShown', 'true');
+      }, 1500); 
+    }
+  }, [showSplash]);
+
+  // 탭 변경 시 세션에 저장
+  useEffect(() => {
+    sessionStorage.setItem('currentTab', currentTab);
+  }, [currentTab]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -172,7 +142,6 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 앱 실행 시 인증 상태만 깔끔하게 확인합니다.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -258,17 +227,10 @@ export default function JudgeMapApp() {
                 select: { label: { color: '#ffffff', fontWeight: 'bold' }, itemStyle: { areaColor: '#2563eb' } }
               }]
             });
-            // myChart.on('click', function (params) {
-            //   setSelectedRegionName(regionMapping[params.name] || params.name);
-            //   setSelectedJudge(null);
-            // });
-            // 수정할 코드
             myChart.on('click', function (params) {
-              // 💡 이벤트가 아래로 전달되지 않게 차단
               if (params.event && params.event.stop) {
                 params.event.stop(); 
               }
-              
               setSelectedRegionName(regionMapping[params.name] || params.name);
               setSelectedJudge(null);
             });
@@ -282,9 +244,7 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 [핵심 해결 로직] 딜레이 없이 팝업을 즉시 호출하여 브라우저 차단 우회
   const handleLogin = () => {
-    // 🚨 절대 이 위치에 setIsAuthLoading(true) 같은 로딩창 코드를 넣지 마세요! (모바일 팝업 차단의 원흉)
     signInWithPopup(auth, googleProvider)
       .then((result) => {
         setUser(result.user);
@@ -363,16 +323,9 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.06</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.05</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
-          {/* 💡 [임시] 데이터 업로드용 버튼 */}
-          {/* <button 
-            onClick={uploadDummyData} 
-            className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-full text-xs font-bold transition mr-2"
-          >
-            ⚙️ 테스트 데이터 생성
-          </button> */}
           {user ? (
             <button onClick={handleLogout} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full text-xs font-bold transition border border-slate-700 shadow-sm"><img src={user.photoURL} alt="profile" className="w-5 h-5 rounded-full" /> 로그아웃</button>
           ) : (
@@ -395,7 +348,8 @@ export default function JudgeMapApp() {
               <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
-                  <button onClick={() => setSelectedRegionName(null)} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
+                  {/* 💡 X 버튼 클릭 시 상태 직접 제어 대신 브라우저 뒤로가기 실행 */}
+                  <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
@@ -589,7 +543,6 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* {selectedJudge && <JudgeDetailModal judge={selectedJudge} keyboardOffset={keyboardOffset} allJudges={judges} user={user} onClose={() => setSelectedJudge(null)} showToast={showToast} currentTab={currentTab} selectedRegionName={selectedRegionName} />} */}
       {selectedJudge && (
         <JudgeDetailModal 
           key={selectedJudge.id} 
@@ -597,7 +550,8 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          onClose={() => setSelectedJudge(null)}
+          // 💡 모달 닫을 때도 직접 제어 대신 브라우저 뒤로가기 실행
+          onClose={() => window.history.back()}
           showToast={showToast} 
           currentTab={currentTab} 
           selectedRegionName={selectedRegionName} 
