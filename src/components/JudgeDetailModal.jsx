@@ -56,6 +56,29 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [judge]);
 
+  // 💡 뒤로가기 시 앱 종료 방지 로직
+  useEffect(() => {
+    // 1. 모달이 열리면 브라우저 히스토리에 상태 추가
+    window.history.pushState({ modalOpen: true }, '');
+
+    const handlePopState = (event) => {
+      // 2. 뒤로가기 이벤트 발생 시 모달 닫기 실행
+      onClose();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      // 3. 컴포넌트 언마운트 시 이벤트 리스너 제거
+      window.removeEventListener('popstate', handlePopState);
+      
+      // 4. 모달이 닫힐 때 히스토리에 추가했던 상태를 뒤로가기로 제거
+      if (window.history.state?.modalOpen) {
+        window.history.back();
+      }
+    };
+  }, [onClose]);
+
   const toggleBookmark = async () => {
     if (!user) return showToast("즐겨찾기를 하려면 먼저 로그인해주세요.", "error");
     try {
