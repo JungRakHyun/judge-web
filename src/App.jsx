@@ -31,7 +31,7 @@ const JudgeSkeletonCard = () => (
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
   
-  // 💡 앱 상태 유지 로직: 세션 스토리지를 이용해 나갔다 들어와도 로딩창을 건너뛰고 탭을 유지함
+  // 💡 앱 유지 로직: 브라우저 세션에 저장하여 나갔다 들어와도 탭과 스플래시 상태 유지
   const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
   const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
   
@@ -72,41 +72,30 @@ export default function JudgeMapApp() {
   // =====================================================================
   const [lastBackPress, setLastBackPress] = useState(0);
 
-  // 1. 앱 초기 실행 시 (지도 화면용 스택)
   useEffect(() => {
-    window.history.pushState({ page: 'main' }, '');
+    // 앱 초기화 시 뒤로가기 스택을 하나 깔아둠
+    window.history.pushState({ step: 'main' }, '');
   }, []);
 
-  // 2. 지역 선택 시 스택 추가
-  useEffect(() => {
-    if (selectedRegionName && !selectedJudge) {
-      window.history.pushState({ page: 'region' }, '');
-    }
-  }, [selectedRegionName]);
-
-  // 3. 판사 선택 시 스택 추가
-  useEffect(() => {
-    if (selectedJudge) {
-      window.history.pushState({ page: 'judge' }, '');
-    }
-  }, [selectedJudge]);
-
-  // 4. 뒤로가기 감지 시 상태 해제
   useEffect(() => {
     const handlePopState = (e) => {
+      // 1. 상세페이지가 떠있으면 상세 닫기
       if (selectedJudge) {
-        setSelectedJudge(null); // 판사 상세 닫기
-      } else if (selectedRegionName) {
-        setSelectedRegionName(null); // 지역 리스트 닫기
-      } else {
-        // 메인 지도 화면일 때 종료 로직 작동
+        setSelectedJudge(null);
+      } 
+      // 2. 리스트가 떠있으면 리스트 닫기
+      else if (selectedRegionName) {
+        setSelectedRegionName(null);
+      } 
+      // 3. 완전히 메인 화면일 때 종료 로직
+      else {
         const now = Date.now();
         if (now - lastBackPress < 2000) {
-          window.close(); // 앱 종료
+          window.history.back(); // 실제 앱 종료 (PWA 표준 동작)
         } else {
           setLastBackPress(now);
           showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-          window.history.pushState({ page: 'main' }, ''); // 튕김 방지용 스택 재충전
+          window.history.pushState({ step: 'main' }, ''); // 튕김 방지용 스택 재충전
         }
       }
     };
@@ -116,7 +105,7 @@ export default function JudgeMapApp() {
   }, [selectedJudge, selectedRegionName, lastBackPress]);
   // =====================================================================
 
-  // 스플래시 화면 타이머
+  // 스플래시 화면 제어 및 상태 저장
   useEffect(() => { 
     if (showSplash) {
       setTimeout(() => {
@@ -126,7 +115,7 @@ export default function JudgeMapApp() {
     }
   }, [showSplash]);
 
-  // 탭 변경 시 세션에 저장
+  // 탭 변경 시 세션 저장
   useEffect(() => {
     sessionStorage.setItem('currentTab', currentTab);
   }, [currentTab]);
@@ -162,6 +151,7 @@ export default function JudgeMapApp() {
       if (targetJudgeId && !selectedJudge) {
         const targetJudge = judges.find(j => j.id === targetJudgeId);
         if (targetJudge) {
+          window.history.pushState({ step: 'judge' }, ''); // 다이렉트 접근 시 스택 추가
           setSelectedJudge(targetJudge); 
           window.history.replaceState({}, document.title, window.location.pathname);
         }
@@ -231,6 +221,8 @@ export default function JudgeMapApp() {
               if (params.event && params.event.stop) {
                 params.event.stop(); 
               }
+              // 💡 명시적으로 지역 리스트 열 때 스택 추가
+              window.history.pushState({ step: 'region' }, '');
               setSelectedRegionName(regionMapping[params.name] || params.name);
               setSelectedJudge(null);
             });
@@ -323,7 +315,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.05</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.06</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
@@ -348,7 +340,7 @@ export default function JudgeMapApp() {
               <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
-                  {/* 💡 X 버튼 클릭 시 상태 직접 제어 대신 브라우저 뒤로가기 실행 */}
+                  {/* 💡 X 버튼 클릭 시 상태 직접 변경 대신 뒤로가기를 호출하여 동기화 */}
                   <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
                 </div>
                 
@@ -365,7 +357,11 @@ export default function JudgeMapApp() {
                   ) : (
                     <div className="flex flex-col gap-3">
                       {regionJudges.slice(0, displayCount).map(j => (
-                        <div key={j.id} onClick={() => setSelectedJudge(j)} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
+                        <div key={j.id} onClick={() => {
+                          // 💡 명시적으로 판사 열 때 스택 추가
+                          window.history.pushState({ step: 'judge' }, '');
+                          setSelectedJudge(j);
+                        }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                           <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
                           <div className="flex items-center gap-3">
                             <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
@@ -411,7 +407,10 @@ export default function JudgeMapApp() {
                 {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
                   <>
                     {searchedJudges.slice(0, displayCount).map(j => (
-                      <div key={j.id} onClick={() => setSelectedJudge(j)} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
+                      <div key={j.id} onClick={() => {
+                        window.history.pushState({ step: 'judge' }, '');
+                        setSelectedJudge(j);
+                      }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                         <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
                         <div className="flex items-center gap-3">
                           <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
@@ -515,7 +514,13 @@ export default function JudgeMapApp() {
                 ) : (
                   <div className="space-y-3">
                     {myReviews.map((rev, idx) => (
-                      <div key={idx} onClick={() => { const judge = judges.find(j => j.id === rev.judgeId); if(judge) setSelectedJudge(judge); }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
+                      <div key={idx} onClick={() => { 
+                        const judge = judges.find(j => j.id === rev.judgeId); 
+                        if(judge) {
+                          window.history.pushState({ step: 'judge' }, '');
+                          setSelectedJudge(judge); 
+                        }
+                      }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
                         <div className="flex justify-between items-center mb-2"><p className="text-xs font-bold text-blue-600">{rev.court} • {rev.judgeName}</p><span className="text-[10px] text-slate-400">{formatDate(rev.timestamp)}</span></div>
                         <div className="flex items-center mb-1.5 gap-1">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
                         <p className="text-[13px] text-slate-700">{rev.comment}</p>
@@ -550,7 +555,7 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          // 💡 모달 닫을 때도 직접 제어 대신 브라우저 뒤로가기 실행
+          // 💡 모달 닫을 때 무조건 브라우저 뒤로가기 실행 (popstate와 동기화)
           onClose={() => window.history.back()}
           showToast={showToast} 
           currentTab={currentTab} 
