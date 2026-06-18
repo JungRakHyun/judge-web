@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { ChevronLeft, Share2, X, Bot, Star, ThumbsUp, Flag, MessageSquare } from 'lucide-react';
+import { ChevronLeft, Share2, X, Bot, Star, ThumbsUp, Flag, MessageSquare, Heart } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { getAvgRating, formatDate, getUserBadge } from '../utils';
@@ -12,17 +12,34 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   const [isKeyboardActive, setIsKeyboardActive] = useState(false);
   const [reportModalReview, setReportModalReview] = useState(null);
 
+  // 차트 데이터 (등록된 데이터가 없으면 기본값으로 1/3씩 분배)
   const chartData = [
     { name: '원고 승소', value: judge.win_rate || 33, color: '#3B82F6' },
     { name: '피고 승소', value: judge.lose_rate || 33, color: '#EF4444' },
     { name: '조정 및 화해', value: judge.draw_rate || 34, color: '#10B981' }
   ];
 
-  // 💡 수정된 공유하기 로직 (딥링크 적용)
+  // 즐겨찾기 (북마크) 상태 확인
+  const bookmarkedUsers = judge.bookmarkedUsers || [];
+  const isBookmarked = bookmarkedUsers.includes(user?.uid);
+
+  // 💡 즐겨찾기 토글 함수
+  const toggleBookmark = async () => {
+    if (!user) return showToast("즐겨찾기를 하려면 먼저 로그인해주세요.", "error");
+    try {
+      const newBookmarks = isBookmarked
+        ? bookmarkedUsers.filter(id => id !== user.uid)
+        : [...bookmarkedUsers, user.uid];
+      
+      await updateDoc(doc(db, "judges", judge.id), { bookmarkedUsers: newBookmarks });
+      showToast(isBookmarked ? "즐겨찾기에서 해제되었습니다." : "즐겨찾기에 추가되었습니다!");
+    } catch (e) {
+      showToast("즐겨찾기 처리 실패", "error");
+    }
+  };
+
   const handleShare = async () => {
-    // 현재 접속한 도메인 뒤에 판사의 고유 ID를 붙여서 전용 링크를 만듭니다.
     const shareUrl = `${window.location.origin}${window.location.pathname}?judgeId=${judge.id}`;
-    
     const shareData = { 
       title: `${judge.name} 판사 정보 - JUDGE MAP`, 
       text: `${judge.court} 소속 ${judge.name} 판사의 판결 성향과 리뷰를 확인해보세요!`, 
@@ -60,11 +77,11 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   const handleLikeReview = async (rev) => {
     if (!user) return showToast("로그인이 필요합니다.", "error");
     const likedUsers = rev.likedUsers || [];
-    const isLiked = likedUsers.includes(user.uid);
+    const isReviewLiked = likedUsers.includes(user.uid);
     try {
       const updatedReviews = judge.reviews.map(r => {
         if (r.uid === rev.uid && r.timestamp === rev.timestamp) {
-          if (isLiked) return { ...r, likes: Math.max(0, (r.likes || 1) - 1), likedUsers: likedUsers.filter(id => id !== user.uid) };
+          if (isReviewLiked) return { ...r, likes: Math.max(0, (r.likes || 1) - 1), likedUsers: likedUsers.filter(id => id !== user.uid) };
           else return { ...r, likes: (r.likes || 0) + 1, likedUsers: [...likedUsers, user.uid] };
         }
         return r;
@@ -76,12 +93,16 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   return (
     <>
       <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
-        <div className={`w-full max-w-md bg-white rounded-t-3xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isKeyboardActive ? 'h-[95dvh] rounded-none' : 'h-[90dvh]'}`}>
+        <div className={`w-full max-w-md bg-white rounded-t-3xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isKeyboardActive ? 'h-[100dvh] rounded-none' : 'h-[90dvh]'}`}>
           <div className="p-4 pb-3 border-b border-slate-100 shrink-0 flex justify-between items-center bg-white rounded-t-3xl">
             {currentTab === 'map' && selectedRegionName ? (
               <button onClick={onClose} className="flex items-center gap-1 text-slate-500 hover:text-slate-800 font-bold text-sm bg-slate-50 px-2 py-1.5 rounded-lg transition-colors"><ChevronLeft size={18} /> 목록</button>
             ) : (<h2 className="text-base font-bold text-slate-900 ml-1">상세 정보</h2>)}
             <div className="flex items-center gap-2">
+              {/* 💡 추가된 즐겨찾기(하트) 버튼 */}
+              <button onClick={toggleBookmark} className={`p-1.5 rounded-full transition-colors ${isBookmarked ? 'bg-pink-50 text-pink-500' : 'bg-slate-50 hover:bg-pink-50 hover:text-pink-500 text-slate-500'}`}>
+                <Heart size={18} className={isBookmarked ? 'fill-pink-500' : ''} />
+              </button>
               <button onClick={handleShare} className="p-1.5 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-full text-slate-500 transition-colors"><Share2 size={18} /></button>
               <button onClick={onClose} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"><X size={20} /></button>
             </div>
@@ -129,7 +150,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                 <div className="space-y-3">
                   {[...judge.reviews].reverse().map((rev, idx) => {
                     const authorBadge = getUserBadge(allJudges.reduce((acc, j) => acc + (j.reviews?.filter(r => r.uid === rev.uid).length || 0), 0));
-                    const isLiked = rev.likedUsers?.includes(user?.uid);
+                    const isReviewLiked = rev.likedUsers?.includes(user?.uid);
                     return (
                       <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
                         <div className="flex justify-between items-center mb-1.5">
@@ -143,8 +164,8 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                         <p className="text-[13px] text-slate-700 mb-3 leading-snug">{rev.comment}</p>
                         
                         <div className="flex gap-3 justify-end border-t border-slate-50 pt-2 mt-1">
-                          <button onClick={() => handleLikeReview(rev)} className={`flex items-center gap-1 text-[10px] font-bold transition-colors ${isLiked ? 'text-blue-600' : 'text-slate-400 hover:text-blue-500'}`}>
-                            <ThumbsUp size={12} className={isLiked ? 'fill-blue-600' : ''} /> 공감 {rev.likes > 0 ? rev.likes : ''}
+                          <button onClick={() => handleLikeReview(rev)} className={`flex items-center gap-1 text-[10px] font-bold transition-colors ${isReviewLiked ? 'text-blue-600' : 'text-slate-400 hover:text-blue-500'}`}>
+                            <ThumbsUp size={12} className={isReviewLiked ? 'fill-blue-600' : ''} /> 공감 {rev.likes > 0 ? rev.likes : ''}
                           </button>
                           <button onClick={() => { if(!user) return showToast("로그인이 필요합니다.", "error"); setReportModalReview(rev); }} className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors">
                             <Flag size={12} /> 신고
@@ -158,7 +179,8 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
             </div>
           </div>
 
-          <div className="p-4 pt-3 bg-white border-t border-slate-100 shrink-0 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)]">
+          {/* 💡 모바일 키보드 올라올 때 입력창이 가려지지 않도록 대폭 위로 띄움 (pb-[35vh]) */}
+          <div className={`p-4 pt-3 bg-white border-t border-slate-100 shrink-0 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] transition-all duration-300 ${isKeyboardActive ? 'pb-[35vh]' : 'pb-4'}`}>
             {!user ? (
               <div className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <p className="text-[13px] font-bold text-slate-600 mb-2">리뷰를 작성하려면 로그인이 필요합니다.</p>
@@ -187,7 +209,6 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
         </div>
       </div>
       
-      {/* 신고 모달을 이 모달 위에 띄움 */}
       {reportModalReview && <ReportModal review={reportModalReview} judgeId={judge.id} user={user} onClose={() => setReportModalReview(null)} showToast={showToast} />}
     </>
   );
