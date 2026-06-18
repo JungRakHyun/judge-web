@@ -120,37 +120,45 @@ export default function JudgeMapApp() {
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
   // 💡 [추가] 메인 화면 뒤로가기 2번 로직
-  const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastBackPress, setLastBackPress] = useState(0);
 
-  // JudgeMapApp.jsx의 handleMainBackPress 수정
   useEffect(() => {
     const handleMainBackPress = (e) => {
-      // 1. 상세화면이 떠있으면 상세화면 닫기 (상태만 null로 변경)
+      // 1. 상세페이지가 떠있으면 상세페이지 닫기
       if (selectedJudge) {
         setSelectedJudge(null);
         return;
       }
-
-      // 2. 판사 리스트가 떠있으면 리스트 닫기 (상태만 null로 변경)
+      
+      // 2. 리스트가 떠있으면 리스트 닫기
       if (selectedRegionName) {
         setSelectedRegionName(null);
         return;
       }
 
-      // 3. 지도 메인 화면일 때만 종료 로직
+      // 3. (지도 메인화면) 여기부터는 종료 로직
+      // 💡 핵심: 브라우저가 바로 종료되지 않도록 
+      // 이 로직이 실행될 때 브라우저의 기본 동작을 막을 필요가 있습니다.
       const now = Date.now();
       if (now - lastBackPress < 2000) {
+        // 2초 내에 두 번 누르면 종료
         window.close();
       } else {
         setLastBackPress(now);
         showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+        
+        // 💡 중요: 메인화면에서 첫 클릭 시 뒤로가기 동작을 무효화하기 위해 
+        // 히스토리를 다시 앞으로 밀어넣어 앱이 튕기지 않게 유지합니다.
+        window.history.pushState(null, '', window.location.href);
       }
     };
 
+    // 앱 시작 시 빈 히스토리를 하나 밀어넣어 뒤로가기 버튼이 활성화되도록 함
+    window.history.pushState(null, '', window.location.href);
     window.addEventListener('popstate', handleMainBackPress);
+
     return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge, selectedRegionName]); // 💡 의존성 추가
+  }, [lastBackPress, selectedJudge, selectedRegionName]);
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
