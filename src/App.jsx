@@ -218,7 +218,17 @@ export default function JudgeMapApp() {
                 select: { label: { color: '#ffffff', fontWeight: 'bold' }, itemStyle: { areaColor: '#2563eb' } }
               }]
             });
+            // myChart.on('click', function (params) {
+            //   setSelectedRegionName(regionMapping[params.name] || params.name);
+            //   setSelectedJudge(null);
+            // });
+            // 수정할 코드
             myChart.on('click', function (params) {
+              // 💡 이벤트가 아래로 전달되지 않게 차단
+              if (params.event && params.event.stop) {
+                params.event.stop(); 
+              }
+              
               setSelectedRegionName(regionMapping[params.name] || params.name);
               setSelectedJudge(null);
             });
@@ -336,7 +346,7 @@ export default function JudgeMapApp() {
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
             {mapStatus === "loading" && <p className="text-blue-400 text-sm font-bold animate-pulse absolute z-0">지도를 불러오는 중...</p>}
-            <div ref={mapRef} style={{ width: '100%', height: '100%' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
+            <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
           </div>
           <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-300 px-4 py-1.5 rounded-full text-[11px] font-bold pointer-events-none shadow-lg whitespace-nowrap">지역을 터치하거나 줌인하세요</div>
 
