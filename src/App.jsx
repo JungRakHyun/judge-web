@@ -119,6 +119,27 @@ export default function JudgeMapApp() {
 
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
+  // 💡 [추가] 메인 화면 뒤로가기 2번 로직
+  const [lastBackPress, setLastBackPress] = useState(0);
+
+  useEffect(() => {
+    const handleMainBackPress = (e) => {
+      // 상세페이지가 열려있을 땐 모달 닫기가 우선이므로 이 로직은 무시
+      if (selectedJudge) return;
+
+      const now = Date.now();
+      if (now - lastBackPress < 2000) {
+        window.close(); // 2초 내 재입력 시 종료
+      } else {
+        setLastBackPress(now);
+        showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+      }
+    };
+
+    window.addEventListener('popstate', handleMainBackPress);
+    return () => window.removeEventListener('popstate', handleMainBackPress);
+  }, [lastBackPress, selectedJudge]); // selectedJudge가 바뀔 때마다 감지
+
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
   useEffect(() => {
@@ -132,7 +153,7 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 앱 실행 시 인증 상태만 깔끔하게 확인합니다.
+  // 앱 실행 시 인증 상태만 깔끔하게 확인합니다.
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
