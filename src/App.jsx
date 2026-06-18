@@ -120,16 +120,17 @@ export default function JudgeMapApp() {
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
   // 💡 [추가] 메인 화면 뒤로가기 2번 로직
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastBackPress, setLastBackPress] = useState(0);
 
   useEffect(() => {
     const handleMainBackPress = (e) => {
-      // 상세페이지가 열려있을 땐 모달 닫기가 우선이므로 이 로직은 무시
-      if (selectedJudge) return;
+      // 💡 상세페이지가 열려있거나, 화면 전환 중(모달 닫는 중)이면 로직 실행 안 함
+      if (selectedJudge || isTransitioning) return;
 
       const now = Date.now();
       if (now - lastBackPress < 2000) {
-        window.close(); // 2초 내 재입력 시 종료
+        window.close();
       } else {
         setLastBackPress(now);
         showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
@@ -138,7 +139,7 @@ export default function JudgeMapApp() {
 
     window.addEventListener('popstate', handleMainBackPress);
     return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge]); // selectedJudge가 바뀔 때마다 감지
+  }, [lastBackPress, selectedJudge, isTransitioning]); // 💡 의존성 배열에 isTransitioning 추가
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
@@ -579,11 +580,15 @@ export default function JudgeMapApp() {
           allJudges={judges} 
           user={user} 
           onClose={() => {
-            // 💡 모달 닫을 때 히스토리 스택 하나를 확실히 제거하고 상태를 비움
+            setIsTransitioning(true); // 💡 상세화면 닫을 때 잠금 시작
+            
             if (window.history.state?.modalOpen) {
               window.history.back();
             }
             setSelectedJudge(null);
+            
+            // 0.5초 뒤에 잠금을 풀어줍니다.
+            setTimeout(() => setIsTransitioning(false), 500);
           }} 
           showToast={showToast} 
           currentTab={currentTab} 
