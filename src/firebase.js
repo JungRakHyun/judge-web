@@ -5,7 +5,8 @@ import { getAuth, GoogleAuthProvider, browserLocalPersistence, setPersistence } 
 // 본인의 Firebase 프로젝트 설정값으로 교체하셔야 합니다.
 const firebaseConfig = {
   apiKey: "AIzaSyC2CcdqYPIoOLoWsxru8J8-l6wrJ00fq2M",
-  authDomain: "rakproject-bd9d1.firebaseapp.com",
+  authDomain: "rakproject-bd9d1.web.app",
+  // authDomain: "rakproject-bd9d1.firebaseapp.com",
   // authDomain: "judge-web-nu.vercel.app",
   databaseURL: "https://rakproject-bd9d1-default-rtdb.firebaseio.com",
   projectId: "rakproject-bd9d1",
@@ -20,6 +21,4 @@ export const db = getFirestore(app, "testweb");
 
 // 구글 로그인 인증 모듈 초기화
 export const auth = getAuth(app);
-setPersistence(auth, browserLocalPersistence);
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.setCustomParameters({ prompt: 'select_account' });
