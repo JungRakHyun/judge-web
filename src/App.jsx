@@ -31,9 +31,13 @@ const JudgeSkeletonCard = () => (
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
   
-  // 💡 앱 유지 로직: 브라우저 세션에 저장하여 나갔다 들어와도 탭과 스플래시 상태 유지
+  // 💡 [개선] 앱 유지 로직: 브라우저 세션에 저장하여 나갔다 들어와도 탭과 스플래시 상태 유지
   const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
   const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
+  
+  // 뒤로가기 로직에서 현재 탭을 참조하기 위한 Ref
+  const currentTabRef = useRef(currentTab);
+  useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
   
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true); 
@@ -68,41 +72,59 @@ export default function JudgeMapApp() {
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
   // =====================================================================
-  // 💡 [핵심] 뒤로가기 3단계 완벽 제어 및 앱 종료 로직
+  // 💡 [핵심] 뒤로가기 3단계 완벽 제어 및 앱 종료 로직 (History State Machine)
   // =====================================================================
-  const [lastBackPress, setLastBackPress] = useState(0);
+  const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 앱 초기화 시 뒤로가기 스택을 하나 깔아둠
-    window.history.pushState({ step: 'main' }, '');
-  }, []);
+    // 1. 앱 진입 시 히스토리 스택 초기화 (종료 방어벽 -> 메인)
+    if (!window.history.state || !window.history.state.step) {
+      window.history.replaceState({ step: 'exit_trap' }, '');
+      window.history.pushState({ step: 'main' }, '');
+    }
 
-  useEffect(() => {
+    // 2. 뒤로가기(popstate) 이벤트 핸들러
     const handlePopState = (e) => {
-      // 1. 상세페이지가 떠있으면 상세 닫기
-      if (selectedJudge) {
-        setSelectedJudge(null);
-      } 
-      // 2. 리스트가 떠있으면 리스트 닫기
-      else if (selectedRegionName) {
-        setSelectedRegionName(null);
-      } 
-      // 3. 완전히 메인 화면일 때 종료 로직
-      else {
-        const now = Date.now();
-        if (now - lastBackPress < 2000) {
-          window.history.back(); // 실제 앱 종료 (PWA 표준 동작)
+      const state = e.state;
+      if (!state) return;
+
+      if (state.step === 'exit_trap') {
+        // 메인 화면에서 한 번 더 뒤로가기를 눌렀을 때
+        if (currentTabRef.current !== 'map') {
+          // 다른 탭에 있었다면 맵으로 이동시킴
+          setCurrentTab('map');
+          window.history.pushState({ step: 'main' }, '');
         } else {
-          setLastBackPress(now);
-          showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-          window.history.pushState({ step: 'main' }, ''); // 튕김 방지용 스택 재충전
+          // 맵 탭이라면 종료 타이머 계산
+          const now = Date.now();
+          if (now - lastBackPressRef.current < 2000) {
+            window.history.back(); // 찐 종료
+          } else {
+            lastBackPressRef.current = now;
+            showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+            window.history.pushState({ step: 'main' }, ''); // 튕김 방지용 스택 재충전
+            
+            // 확실한 상태 동기화
+            setSelectedRegionName(null);
+            setSelectedJudge(null);
+          }
         }
+      } else if (state.step === 'main') {
+        // 메인 화면으로 돌아왔을 때 모든 팝업 닫기
+        setSelectedRegionName(null);
+        setSelectedJudge(null);
+      } else if (state.step === 'region') {
+        // 리스트 화면으로 돌아왔을 때 상세만 닫기
+        setSelectedRegionName(state.region);
+        setSelectedJudge(null);
+      } else if (state.step === 'judge') {
+        // 브라우저 앞으로가기 방어
       }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [selectedJudge, selectedRegionName, lastBackPress]);
+  }, []); // 의존성을 비워두어 이벤트 리스너가 꼬이지 않게 함
   // =====================================================================
 
   // 스플래시 화면 제어 및 상태 저장
@@ -151,9 +173,9 @@ export default function JudgeMapApp() {
       if (targetJudgeId && !selectedJudge) {
         const targetJudge = judges.find(j => j.id === targetJudgeId);
         if (targetJudge) {
-          window.history.pushState({ step: 'judge' }, ''); // 다이렉트 접근 시 스택 추가
+          window.history.pushState({ step: 'judge', judgeId: targetJudge.id }, ''); // 직접 접근 시 스택 추가
           setSelectedJudge(targetJudge); 
-          window.history.replaceState({}, document.title, window.location.pathname);
+          window.history.replaceState({ step: 'judge' }, document.title, window.location.pathname);
         }
       }
     }
@@ -221,9 +243,10 @@ export default function JudgeMapApp() {
               if (params.event && params.event.stop) {
                 params.event.stop(); 
               }
+              const region = regionMapping[params.name] || params.name;
               // 💡 명시적으로 지역 리스트 열 때 스택 추가
-              window.history.pushState({ step: 'region' }, '');
-              setSelectedRegionName(regionMapping[params.name] || params.name);
+              window.history.pushState({ step: 'region', region }, '');
+              setSelectedRegionName(region);
               setSelectedJudge(null);
             });
           }
@@ -359,7 +382,7 @@ export default function JudgeMapApp() {
                       {regionJudges.slice(0, displayCount).map(j => (
                         <div key={j.id} onClick={() => {
                           // 💡 명시적으로 판사 열 때 스택 추가
-                          window.history.pushState({ step: 'judge' }, '');
+                          window.history.pushState({ step: 'judge', judgeId: j.id }, '');
                           setSelectedJudge(j);
                         }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                           <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
@@ -408,7 +431,7 @@ export default function JudgeMapApp() {
                   <>
                     {searchedJudges.slice(0, displayCount).map(j => (
                       <div key={j.id} onClick={() => {
-                        window.history.pushState({ step: 'judge' }, '');
+                        window.history.pushState({ step: 'judge', judgeId: j.id }, '');
                         setSelectedJudge(j);
                       }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
                         <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
@@ -517,7 +540,7 @@ export default function JudgeMapApp() {
                       <div key={idx} onClick={() => { 
                         const judge = judges.find(j => j.id === rev.judgeId); 
                         if(judge) {
-                          window.history.pushState({ step: 'judge' }, '');
+                          window.history.pushState({ step: 'judge', judgeId: judge.id }, '');
                           setSelectedJudge(judge); 
                         }
                       }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
@@ -555,7 +578,7 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          // 💡 모달 닫을 때 무조건 브라우저 뒤로가기 실행 (popstate와 동기화)
+          // 💡 모달을 닫을 때도 브라우저와 동기화하기 위해 직접 무조건 history.back() 호출
           onClose={() => window.history.back()}
           showToast={showToast} 
           currentTab={currentTab} 
