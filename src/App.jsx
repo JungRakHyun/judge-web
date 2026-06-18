@@ -85,38 +85,35 @@ export default function JudgeMapApp() {
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 하위 탭 무한 스택 적재 결함 방지를 위해 초기 베이스 스택만 할당
-    if (!window.history.state || !window.history.state.step) {
-      window.history.replaceState({ step: 'exit_trap' }, '');
+    // 💡 앱 첫 실행 직후 바로 꺼지는 버그 방지 (안전하게 스택 하나만 쌓음)
+    if (!window.history.state) {
       window.history.pushState({ step: 'main' }, '');
     }
 
     const handlePopState = (e) => {
       const state = e.state;
-      if (!state) return;
 
-      if (state.step === 'exit_trap') {
-        // 하단 탭 내비게이션 상태에서 뒤로가기 감지 시 메인 맵으로 강제 복귀 처리
+      // state가 없거나 exit_trap인 경우 = 히스토리 맨 밑바닥(앱 종료 직전)에 닿았다는 뜻
+      if (!state || state.step === 'exit_trap') {
         if (currentTabRef.current !== 'map') {
+          // 타 탭에 있었다면 맵으로 무조건 보냄
           setCurrentTab('map');
           window.history.pushState({ step: 'main' }, '');
         } else {
-          // 메인 지도 루트 컨텍스트 진입 시 종료 더블클릭 타이머 가동
+          // 맵이었다면 종료 로직 (한 번 더 누르면 종료) 가동
           const now = Date.now();
           if (now - lastBackPressRef.current < 2000) {
             window.history.back(); 
           } else {
             lastBackPressRef.current = now;
-            showToast("뒤로가기 버튼을 한 일 번 더 누르면 종료됩니다.");
+            showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
             window.history.pushState({ step: 'main' }, ''); 
             
-            // 레이스 컨디션 방지를 위한 명시적 핸들러 초기화
             setSelectedRegionName(null);
             setSelectedJudge(null);
           }
         }
       } else if (state.step === 'main') {
-        // 💡 [수정됨] 타 탭에서 뒤로가기 시 탭을 메인(map)으로 완전히 초기화
         setCurrentTab('map');
         setSelectedRegionName(null);
         setSelectedJudge(null);
@@ -125,7 +122,6 @@ export default function JudgeMapApp() {
         setSelectedRegionName(state.region);
         setSelectedJudge(null);
       } else if (state.step === 'tab') {
-        // 💡 [수정됨] 탭 간 뒤로가기 백트래킹 지원
         setCurrentTab(state.tab);
         setSelectedRegionName(null);
         setSelectedJudge(null);
@@ -134,7 +130,7 @@ export default function JudgeMapApp() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []); 
+  }, []);
 
   // 💡 [수정됨] 탭 전환 시 히스토리 스택 추가하여 뒤로가기 흐름 유지
   const handleTabChange = (tabName) => {
@@ -360,7 +356,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.13</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.14</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
