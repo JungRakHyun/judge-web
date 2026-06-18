@@ -4,7 +4,6 @@ import {
   Scale, LogIn, Map as MapIcon, Search, PlusCircle, UserCircle, Star, ChevronRight, 
   ShieldAlert, Settings, Edit, Trash2, CheckCircle2, AlertCircle, MapPin, X 
 } from 'lucide-react';
-
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -13,7 +12,6 @@ import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
 
-// 데이터 패칭 지연 시 노출할 스켈레톤 컴포넌트
 const JudgeSkeletonCard = () => (
   <div className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm animate-pulse">
     <div className="space-y-3">
@@ -33,31 +31,23 @@ const JudgeSkeletonCard = () => (
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
   
-  // 세션 스토리지를 활용한 앱 상태 유지 (백그라운드 전환 대응)
+  // 세션 스토리지 기반 탭 및 스플래시 상태 유지
   const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
   const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
   
-  // popstate 이벤트에서 최신 상태를 참조하기 위한 Ref 바인딩
+  // popstate 핸들러 참조용 tab ref
   const currentTabRef = useRef(currentTab);
   useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
   
-  // 사용자 및 전역 데이터 상태
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
   const [isLoadingData, setIsLoadingData] = useState(true);
   
-  // UI 렌더링 트리거 상태
   const [selectedRegionName, setSelectedRegionName] = useState(null); 
-  const selectedRegionRef = useRef(selectedRegionName);
-  useEffect(() => { selectedRegionRef.current = selectedRegionName; }, [selectedRegionName]);
-
   const [selectedJudge, setSelectedJudge] = useState(null); 
-  const selectedJudgeRef = useRef(selectedJudge);
-  useEffect(() => { selectedJudgeRef.current = selectedJudge; }, [selectedJudge]);
   
-  // 로컬 UI 상태
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState("latest"); 
   const [mapStatus, setMapStatus] = useState("loading");
@@ -65,12 +55,10 @@ export default function JudgeMapApp() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [editModalJudge, setEditModalJudge] = useState(null);
 
-  // 무한 스크롤 및 레이아웃 관련 상태
   const [displayCount, setDisplayCount] = useState(10);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const observer = useRef();
 
-  // 폼 초기값
   const [newJudge, setNewJudge] = useState({
     name: '', title: '판사', region: '서울', court: '', department: '', career: '', ai_summary: '',
     win_rate: 45, lose_rate: 35, draw_rate: 20
@@ -83,11 +71,11 @@ export default function JudgeMapApp() {
 
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
-  // SPA History API 라우팅 제어 (뒤로가기 동기화)
+  // 뒤로가기 제어 및 연속 클릭 종료 타이머 핸들러 (Ref 기반 메모리 누수 및 클로저 격리 방지)
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 앱 진입 시 물리버튼 강제 종료를 막기 위한 더미 스택 푸시
+    // 무효 기기 제어 방어벽 스택 빌드
     if (!window.history.state || !window.history.state.step) {
       window.history.replaceState({ step: 'exit_trap' }, '');
       window.history.pushState({ step: 'main' }, '');
@@ -98,13 +86,12 @@ export default function JudgeMapApp() {
       if (!state) return;
 
       if (state.step === 'exit_trap') {
-        // 메인 베이스 화면에서 뒤로가기 발생 시
         if (currentTabRef.current !== 'map') {
-          // 타 탭에 있을 경우 지도 탭으로 라우팅 처리
+          // 타 탭에서 뒤로가기 동작 시 메인 지도 스위칭 유도
           setCurrentTab('map');
           window.history.pushState({ step: 'main' }, '');
         } else {
-          // 지도 탭일 경우 2초 제한 종료 로직 실행
+          // 메인 지도 스펙 내에서 2초 스택 종료 시퀀서 작동
           const now = Date.now();
           if (now - lastBackPressRef.current < 2000) {
             window.history.back(); 
@@ -113,19 +100,16 @@ export default function JudgeMapApp() {
             showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
             window.history.pushState({ step: 'main' }, ''); 
             
-            // 상태 꼬임 방지를 위한 초기화
-            if (selectedRegionRef.current) setSelectedRegionName(null);
-            if (selectedJudgeRef.current) setSelectedJudge(null);
+            setSelectedRegionName(null);
+            setSelectedJudge(null);
           }
         }
       } else if (state.step === 'main') {
-        // 지역 모달이나 상세 팝업이 닫히고 메인으로 돌아왔을 때
-        if (selectedRegionRef.current) setSelectedRegionName(null);
-        if (selectedJudgeRef.current) setSelectedJudge(null);
+        setSelectedRegionName(null);
+        setSelectedJudge(null);
       } else if (state.step === 'region') {
-        // 상세 팝업만 닫히고 지역 리스트로 돌아왔을 때
         setSelectedRegionName(state.region);
-        if (selectedJudgeRef.current) setSelectedJudge(null);
+        setSelectedJudge(null);
       }
     };
 
@@ -133,7 +117,6 @@ export default function JudgeMapApp() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []); 
 
-  // 스플래시 노출 제어
   useEffect(() => { 
     if (showSplash) {
       setTimeout(() => {
@@ -143,12 +126,10 @@ export default function JudgeMapApp() {
     }
   }, [showSplash]);
 
-  // 탭 변경 세션 동기화
   useEffect(() => {
     sessionStorage.setItem('currentTab', currentTab);
   }, [currentTab]);
 
-  // 모바일 가상 키보드 리사이징 대응
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -160,7 +141,6 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // Auth 상태 구독
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -169,12 +149,10 @@ export default function JudgeMapApp() {
     return () => unsubscribe();
   }, []);
 
-  // 정렬 조건 변경 시 노출 개수 초기화
   useEffect(() => {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-  // 직링크(Query Parameter) 접속 시 타겟 판사 상세 모달 로드
   useEffect(() => {
     if (judges.length > 0) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -191,7 +169,6 @@ export default function JudgeMapApp() {
     }
   }, [judges]);
   
-  // 무한 스크롤 옵저버
   const lastElementRef = useCallback(node => {
     if (isLoadingData) return;
     if (observer.current) observer.current.disconnect();
@@ -203,7 +180,6 @@ export default function JudgeMapApp() {
     if (node) observer.current.observe(node);
   }, [isLoadingData]);
 
-  // Firestore 데이터 실시간 구독
   useEffect(() => {
     if (isAuthLoading) return;
 
@@ -212,7 +188,6 @@ export default function JudgeMapApp() {
       setJudges(data);
       setIsLoadingData(false); 
       
-      // 모달 활성화 상태에서 데이터 변경 시 실시간 반영
       if (selectedJudge) {
         const updated = data.find(j => j.id === selectedJudge.id);
         if (updated) setSelectedJudge(updated);
@@ -228,7 +203,7 @@ export default function JudgeMapApp() {
     return () => { unsubJudges(); unsubReports(); };
   }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
-  // ECharts 렌더링 및 모바일 줌 감도 튜닝
+  // ECharts Map 컴포넌트 마운트 및 모바일 터치 감도 튜닝 세팅
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
     
@@ -244,11 +219,14 @@ export default function JudgeMapApp() {
             myChart = echarts.init(mapRef.current);
             echarts.registerMap('korea', geoJson);
             myChart.setOption({
+              // 핀치 줌 기동 시 바운스 트랜지션 모션 부드럽게 고정
+              animationDurationUpdate: 350,
+              animationEasingUpdate: 'cubicOut',
               tooltip: { show: false },
               series: [{
                 type: 'map', map: 'korea', roam: true, 
-                // 모바일 터치 줌 민감도 제한 (과도한 줌인/줌아웃 방지)
-                scaleLimit: { min: 1.45, max: 3.5 }, 
+                // 지도 스케일 최대 가속 범위 제한으로 기기별 확대 민감도 제어
+                scaleLimit: { min: 1.45, max: 3.2 }, 
                 zoom: 1.45, center: [127.7, 36.3], selectedMode: 'single',
                 label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#94a3b8', formatter: (params) => regionMapping[params.name] || params.name },
                 itemStyle: { areaColor: '#1e293b', borderColor: '#334155', borderWidth: 1.5 },
@@ -256,7 +234,6 @@ export default function JudgeMapApp() {
                 select: { label: { color: '#ffffff', fontWeight: 'bold' }, itemStyle: { areaColor: '#2563eb' } }
               }]
             });
-            
             myChart.on('click', function (params) {
               if (params.event && params.event.stop) {
                 params.event.stop(); 
@@ -284,7 +261,7 @@ export default function JudgeMapApp() {
       })
       .catch((error) => {
         if (error.code === 'auth/popup-blocked') {
-          alert("팝업이 차단되었습니다. 사파리/크롬 등 일반 브라우저를 사용해주세요.");
+          alert("⚠️ 팝업이 차단되었습니다! 카카오톡 등 앱 내부 브라우저가 아닌 일반 '크롬'이나 '사파리' 앱을 직접 켜서 접속해주세요.");
         } else if (error.code !== 'auth/popup-closed-by-user') {
           alert("로그인 실패: " + error.message);
         }
@@ -366,33 +343,31 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
-      {/* 맵핑 컨테이너 */}
+      {/* ==================== 1. 지도 탭 ==================== */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
             {mapStatus === "loading" && <p className="text-blue-400 text-sm font-bold animate-pulse absolute z-0">지도를 불러오는 중...</p>}
-            <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
+            {/* touchAction 셋팅으로 브라우저 본연 제스처와 ECharts 하이퍼 스위칭 중복 간섭 현상 원천 차단 */}
+            <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto', touchAction: 'none' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
           </div>
           <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-300 px-4 py-1.5 rounded-full text-[11px] font-bold pointer-events-none shadow-lg whitespace-nowrap">지역을 터치하거나 줌인하세요</div>
 
-          {/* 지역 리스트 바텀시트 */}
           {selectedRegionName && !selectedJudge && (
             <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
               <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
-                  {/* 컴포넌트 마운트 해제 대신 history API 활용 */}
                   <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
                 </div>
                 
-                {/* overscroll-y-contain 할당으로 모바일 스크롤 바운싱 효과 구현 */}
+                {/* overscroll-y-contain 및 1px 확장 패딩 트릭으로 리스트 오버스크롤 애니메이션 강제 주입 */}
                 <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar overscroll-y-contain">
-                  {/* 스크롤 영역 강제 할당 (100% + 1px) */}
                   <div className="min-h-[calc(100%+1px)] flex flex-col gap-3">
                     {isLoadingData ? (
-                      <>
+                      <div className="flex flex-col gap-3">
                         {[1, 2, 3, 4].map(i => <JudgeSkeletonCard key={i} />)}
-                      </>
+                      </div>
                     ) : regionJudges.length === 0 ? (
                       <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-slate-200">
                         <p className="text-sm font-bold text-slate-500 mb-3">등록된 데이터가 없습니다.</p>
@@ -427,7 +402,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 검색 컨테이너 */}
+      {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50 h-[100dvh] overflow-hidden">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -441,77 +416,35 @@ export default function JudgeMapApp() {
               <button onClick={() => setSortOption('reviews')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'reviews' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>💬 리뷰많은순</button>
             </div>
           </div>
-          
-          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar overscroll-y-contain">
+          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar touch-auto overscroll-y-contain">
             <div className="min-h-[calc(100%+1px)] flex flex-col gap-3 pb-6">
               {isLoadingData ? (
-                <>
+                <div className="flex flex-col gap-3 pb-6">
                   {[1, 2, 3, 4, 5].map(i => <JudgeSkeletonCard key={i} />)}
-                </>
-              ) : searchedJudges.length === 0 ? (
-                <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p>
+                </div>
               ) : (
-                <>
-                  {searchedJudges.slice(0, displayCount).map(j => (
-                    <div key={j.id} onClick={() => {
-                      window.history.pushState({ step: 'judge', judgeId: j.id }, '');
-                      setSelectedJudge(j);
-                    }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
-                      <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
-                        <ChevronRight size={18} className="text-slate-300" />
-                      </div>
-                    </div>
-                  ))}
-                  {displayCount < searchedJudges.length && (
-                    <div ref={lastElementRef} className="py-4 flex justify-center w-full">
-                      <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                    </div>
+                <div className="flex flex-col gap-3 pb-6">
+                  {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
+                    <>
+                      {searchedJudges.slice(0, displayCount).map(j => (
+                        <div key={j.id} onClick={() => {
+                          window.history.pushState({ step: 'judge', judgeId: j.id }, '');
+                          setSelectedJudge(j);
+                        }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
+                          <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
+                            <ChevronRight size={18} className="text-slate-300" />
+                          </div>
+                        </div>
+                      ))}
+                      {displayCount < searchedJudges.length && (
+                        <div ref={lastElementRef} className="py-4 flex justify-center w-full">
+                          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                      )}
+                    </>
                   )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 등록 컨테이너 */}
-      {currentTab === 'register' && (
-        <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50 overscroll-y-contain">
-          <div className="min-h-[calc(100%+1px)]">
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
-              <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2"><PlusCircle className="text-blue-600" /> 신규 데이터 등록</h2>
-              {!user ? (
-                 <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 text-center"><LogIn className="text-slate-400 mb-3" size={28} /><p className="text-[15px] font-bold text-slate-700 mb-2">등록 권한이 없습니다.</p><button onClick={handleLogin} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold mt-2">구글로 로그인</button></div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">이름</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500" value={newJudge.name} onChange={e=>setNewJudge({...newJudge, name: e.target.value})} placeholder="홍길동" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">직급</label><select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.title} onChange={e=>setNewJudge({...newJudge, title: e.target.value})}><option>판사</option><option>부장판사</option><option>수석부장판사</option><option>법원장</option></select></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">관할 지역</label>
-                      <select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.region} onChange={e=>setNewJudge({...newJudge, region: e.target.value})}>
-                        {Object.values(regionMapping).filter((v,i,a)=>a.indexOf(v)===i).map(r=><option key={r} value={r}>{r}</option>)}
-                      </select>
-                    </div>
-                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">소속 법원</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.court} onChange={e=>setNewJudge({...newJudge, court: e.target.value})} placeholder="서울중앙지법" /></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">담당 부서</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.department} onChange={e=>setNewJudge({...newJudge, department: e.target.value})} placeholder="형사1부" /></div>
-                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">경력</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.career} onChange={e=>setNewJudge({...newJudge, career: e.target.value})} placeholder="연수원 30기" /></div>
-                  </div>
-                  <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                    <label className="block text-[11px] font-bold text-blue-800 mb-2">판결 성향 (%)</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div><label className="text-[10px] text-slate-500">원고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.win_rate} onChange={e=>setNewJudge({...newJudge, win_rate: e.target.value})} /></div>
-                      <div><label className="text-[10px] text-slate-500">피고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.lose_rate} onChange={e=>setNewJudge({...newJudge, lose_rate: e.target.value})} /></div>
-                      <div><label className="text-[10px] text-slate-500">조정/화해</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.draw_rate} onChange={e=>setNewJudge({...newJudge, draw_rate: e.target.value})} /></div>
-                    </div>
-                  </div>
-                  <button onClick={handleRegisterJudge} disabled={isSubmitting} className={`w-full text-white text-[13px] font-bold py-3.5 rounded-xl mt-4 transition-colors ${isSubmitting ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>{isSubmitting ? '처리 중...' : '등록하기'}</button>
                 </div>
               )}
             </div>
@@ -519,12 +452,53 @@ export default function JudgeMapApp() {
         </div>
       )}
 
-      {/* 마이페이지 컨테이너 */}
+      {/* ==================== 3. 등록 탭 ==================== */}
+      {currentTab === 'register' && (
+        <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50 overscroll-y-contain">
+          <div className="min-h-[calc(100%+1px)] bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
+            <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2"><PlusCircle className="text-blue-600" /> 신규 데이터 등록</h2>
+            {!user ? (
+               <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 text-center"><LogIn className="text-slate-400 mb-3" size={28} /><p className="text-[15px] font-bold text-slate-700 mb-2">등록 권한이 없습니다.</p><button onClick={handleLogin} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold mt-2">구글로 로그인</button></div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">이름</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500" value={newJudge.name} onChange={e=>setNewJudge({...newJudge, name: e.target.value})} placeholder="홍길동" /></div>
+                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">직급</label><select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.title} onChange={e=>setNewJudge({...newJudge, title: e.target.value})}><option>판사</option><option>부장판사</option><option>수석부장판사</option><option>법원장</option></select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">관할 지역</label>
+                    <select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.region} onChange={e=>setNewJudge({...newJudge, region: e.target.value})}>
+                      {Object.values(regionMapping).filter((v,i,a)=>a.indexOf(v)===i).map(r=><option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">소속 법원</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.court} onChange={e=>newJudge({...newJudge, court: e.target.value})} placeholder="서울중앙지법" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">담당 부서</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.department} onChange={e=>setNewJudge({...newJudge, department: e.target.value})} placeholder="형사1부" /></div>
+                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">경력</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.career} onChange={e=>setNewJudge({...newJudge, career: e.target.value})} placeholder="연수원 30기" /></div>
+                </div>
+                <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                  <label className="block text-[11px] font-bold text-blue-800 mb-2">판결 성향 (%)</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div><label className="text-[10px] text-slate-500">원고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.win_rate} onChange={e=>setNewJudge({...newJudge, win_rate: e.target.value})} /></div>
+                    <div><label className="text-[10px] text-slate-500">피고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.lose_rate} onChange={e=>setNewJudge({...newJudge, lose_rate: e.target.value})} /></div>
+                    <div><label className="text-[10px] text-slate-500">조정/화해</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.draw_rate} onChange={e=>setNewJudge({...newJudge, draw_rate: e.target.value})} /></div>
+                  </div>
+                </div>
+                <button onClick={handleRegisterJudge} disabled={isSubmitting} className={`w-full text-white text-[13px] font-bold py-3.5 rounded-xl mt-4 transition-colors ${isSubmitting ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>{isSubmitting ? '처리 중...' : '등록하기'}</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar overscroll-y-contain">
           <div className="min-h-[calc(100%+1px)]">
             {!user ? (
-              <div className="h-full flex flex-col items-center justify-center p-8 text-center pt-[30%]"><UserCircle className="text-slate-300 mb-4" size={48} /><p className="text-lg font-bold text-slate-700 mb-2">로그인이 필요합니다</p><button onClick={handleLogin} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md mt-4">구글로 로그인</button></div>
+              <div className="h-full flex flex-col items-center justify-center p-8 text-center"><UserCircle className="text-slate-300 mb-4" size={48} /><p className="text-lg font-bold text-slate-700 mb-2">로그인이 필요합니다</p><button onClick={handleLogin} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md mt-4">구글로 로그인</button></div>
             ) : (
               <div>
                 <div className="bg-white p-6 border-b border-slate-200 shadow-sm flex items-center gap-5">
@@ -610,7 +584,6 @@ export default function JudgeMapApp() {
           selectedRegionName={selectedRegionName} 
         />
       )}
-      
       {editModalJudge && <AdminEditModal judge={editModalJudge} keyboardOffset={keyboardOffset} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
 
       <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
