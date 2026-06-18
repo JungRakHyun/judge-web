@@ -125,9 +125,16 @@ export default function JudgeMapApp() {
 
   useEffect(() => {
     const handleMainBackPress = (e) => {
-      // 💡 상세페이지가 열려있거나, 화면 전환 중(모달 닫는 중)이면 로직 실행 안 함
+      // 1. 상세페이지가 열려있거나 화면 전환 중이면 종료 로직 건너뜀
       if (selectedJudge || isTransitioning) return;
 
+      // 2. 판사 리스트가 열려있다면(지역 선택된 상태)
+      if (selectedRegionName) {
+        setSelectedRegionName(null); // 💡 리스트만 닫음
+        return;
+      }
+
+      // 3. 완전히 지도 화면일 때만 종료 로직 작동
       const now = Date.now();
       if (now - lastBackPress < 2000) {
         window.close();
@@ -139,7 +146,7 @@ export default function JudgeMapApp() {
 
     window.addEventListener('popstate', handleMainBackPress);
     return () => window.removeEventListener('popstate', handleMainBackPress);
-  }, [lastBackPress, selectedJudge, isTransitioning]); // 💡 의존성 배열에 isTransitioning 추가
+  }, [lastBackPress, selectedJudge, isTransitioning, selectedRegionName]); // 💡 selectedRegionName 의존성 추가
 
   useEffect(() => { setTimeout(() => setShowSplash(false), 1500); }, []);
 
@@ -580,16 +587,21 @@ export default function JudgeMapApp() {
           allJudges={judges} 
           user={user} 
           onClose={() => {
-            setIsTransitioning(true); // 💡 상세화면 닫을 때 잠금 시작
+            setIsTransitioning(true); 
             
+            // 모달 닫기 시 히스토리 이동
             if (window.history.state?.modalOpen) {
               window.history.back();
             }
-            setSelectedJudge(null);
             
-            // 0.5초 뒤에 잠금을 풀어줍니다.
-            setTimeout(() => setIsTransitioning(false), 500);
-          }} 
+            // 💡 중요: 상세화면 닫히고 리스트 화면으로 돌아올 때 
+            // 메인 화면의 popstate 로직이 겹쳐서 실행되지 않도록 
+            // setTimeout을 조금 더 넉넉하게 줍니다.
+            setTimeout(() => {
+              setSelectedJudge(null);
+              setIsTransitioning(false);
+            }, 300);
+          }}
           showToast={showToast} 
           currentTab={currentTab} 
           selectedRegionName={selectedRegionName} 
