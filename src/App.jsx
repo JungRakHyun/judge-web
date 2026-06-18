@@ -31,6 +31,59 @@ const JudgeSkeletonCard = () => (
 
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
+
+  // 💡 [임시] 테스트용 랜덤 판사 데이터 20명 일괄 업로드 함수
+// const uploadDummyData = async () => {
+//   if (!window.confirm("20명의 랜덤 판사 데이터를 파이어베이스에 업로드하시겠습니까?")) return;
+  
+//   const lastNames = ["김", "이", "박", "최", "정", "강", "조", "윤", "장", "임"];
+//   const firstNames = ["민준", "서연", "도윤", "서현", "하준", "민서", "준우", "서윤", "지훈", "윤서"];
+//   const regions = ["서울", "경기/인천", "강원", "충북", "대전/충남", "전북", "광주/전남", "대구/경북", "부산/경남", "제주"];
+//   const courts = ["서울중앙지법", "수원지법", "춘천지법", "청주지법", "대전지법", "전주지법", "광주지법", "대구지법", "부산지법", "제주지법"];
+//   const departments = ["형사1부", "민사2부", "가사3부", "행정4부", "형사 단독", "민사 단독"];
+//   const careers = ["사법연수원 33기", "사법연수원 35기", "사법연수원 38기", "변호사시험 3회", "변호사시험 5회"];
+
+//   try {
+//     const { collection, addDoc } = await import("firebase/firestore");
+    
+//     for (let i = 0; i < 20; i++) {
+//       // 랜덤 이름 및 소속 조합
+//       const name = lastNames[Math.floor(Math.random() * lastNames.length)] + firstNames[Math.floor(Math.random() * firstNames.length)];
+//       const regionIdx = Math.floor(Math.random() * regions.length);
+//       const region = regions[regionIdx];
+//       const court = courts[regionIdx]; // 지역과 법원 싱크 맞춤
+//       const department = departments[Math.floor(Math.random() * departments.length)];
+//       const career = careers[Math.floor(Math.random() * careers.length)];
+      
+//       // 랜덤 판결 비율 계산 (합계가 100이 되도록 조절)
+//       const win_rate = Math.floor(Math.random() * 40) + 30; // 30% ~ 70%
+//       const lose_rate = Math.floor(Math.random() * (90 - win_rate)) + 10;
+//       const draw_rate = 100 - win_rate - lose_rate;
+
+//       const dummyJudge = {
+//         name,
+//         title: Math.random() > 0.7 ? "부장판사" : "판사",
+//         region,
+//         court,
+//         department,
+//         career,
+//         win_rate,
+//         lose_rate,
+//         draw_rate,
+//         reviews: [],
+//         bookmarkedUsers: [],
+//         ai_summary: ""
+//       };
+
+//       await addDoc(collection(db, "judges"), dummyJudge);
+//     }
+    
+//     alert("🎉 랜덤 판사 데이터 20건이 성공적으로 파이어베이스에 등록되었습니다! 화면을 새로고침 하세요.");
+//   } catch (error) {
+//     console.error("데이터 업로드 에러:", error);
+//     alert("데이터 업로드 실패: " + error.message);
+//   }
+// };
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
@@ -263,6 +316,13 @@ export default function JudgeMapApp() {
           <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
+          {/* 💡 [임시] 데이터 업로드용 버튼 */}
+          {/* <button 
+            onClick={uploadDummyData} 
+            className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-full text-xs font-bold transition mr-2"
+          >
+            ⚙️ 테스트 데이터 생성
+          </button> */}
           {user ? (
             <button onClick={handleLogout} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full text-xs font-bold transition border border-slate-700 shadow-sm"><img src={user.photoURL} alt="profile" className="w-5 h-5 rounded-full" /> 로그아웃</button>
           ) : (

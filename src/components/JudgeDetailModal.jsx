@@ -72,9 +72,12 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     }
   };
 
+  // 💡 AI 요약 업데이트 함수 (조건을 1건 이상으로 변경)
   const updateAISummaryIfNeeded = async (currentReviews) => {
-    const validReviews = currentReviews.filter(r => r && r.comment); // 💡 null 필터링
-    if (validReviews.length >= 3) {
+    const validReviews = currentReviews.filter(r => r && r.comment);
+    
+    // 🚨 기존 3건 이상에서 1건 이상(>= 1)으로 기준 하향 조절
+    if (validReviews.length >= 1) {
       const ACTUAL_GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY; 
       if (!ACTUAL_GEMINI_API_KEY) return;
       const prompt = `다음은 ${judge.name} 판사에 대한 리뷰입니다. 이 리뷰들의 공통적인 내용과 판사의 재판 성향을 3줄로 객관적으로 요약해주세요:\n\n${validReviews.map(r => r.comment).join("\n")}`;
@@ -88,6 +91,9 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
           await updateDoc(doc(db, "judges", judge.id), { ai_summary: data.candidates[0].content.parts[0].text });
         }
       } catch (error) { console.error("AI 요약 실패", error); }
+    } else {
+      // 만약 리뷰를 삭제해서 0건이 되었다면 AI 요약도 비워줍니다.
+      await updateDoc(doc(db, "judges", judge.id), { ai_summary: "" });
     }
   };
 
@@ -123,6 +129,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
       const updatedReviews = (judge.reviews || []).filter(r => r && (r.timestamp !== rev.timestamp || r.uid !== rev.uid));
       await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
       showToast("리뷰가 삭제되었습니다.");
+      await updateAISummaryIfNeeded(updatedReviews);
     } catch (e) { showToast("리뷰 삭제 실패", "error"); }
   };
 
@@ -253,7 +260,6 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                 <p className="text-center text-xs text-slate-400 py-4 bg-slate-50 rounded-xl border border-slate-100">등록된 리뷰가 없습니다.</p>
               ) : (
                 <div className="space-y-4">
-                  {/* 💡 찌꺼기 데이터가 있어도 크러시 나지 않게 필터링(.filter(Boolean)) 적용 */}
                   {[...judge.reviews].filter(Boolean).reverse().map((rev, idx) => {
                     const authorBadge = getUserBadge(allJudges.reduce((acc, j) => acc + (j.reviews?.filter(r => r?.uid === rev.uid).length || 0), 0)) || { icon: '', text: '시민', color: 'bg-slate-100 text-slate-500' };
                     const isReviewLiked = rev.likedUsers?.includes(user?.uid);
@@ -326,7 +332,6 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
 
                         {rev.replies && rev.replies.length > 0 && (
                           <div className="mt-3 pl-2 border-l-2 border-slate-200 space-y-2">
-                            {/* 💡 찌꺼기 답글 방어 */}
                             {rev.replies.filter(Boolean).map((reply, rIdx) => {
                               const isMyReply = user?.uid === reply?.uid;
                               const isEditingReply = editingReply?.reviewTimestamp === rev.timestamp && editingReply?.replyTimestamp === reply?.timestamp;
