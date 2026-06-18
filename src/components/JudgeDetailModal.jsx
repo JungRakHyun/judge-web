@@ -16,19 +16,18 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   const [isKeyboardActive, setIsKeyboardActive] = useState(false);
   const [reportModalReview, setReportModalReview] = useState(null);
 
-  // 리뷰/답글 수정 및 작성용 상태 관리
-  const [editingReview, setEditingReview] = useState(null); // { timestamp, text }
-  const [replyingTo, setReplyingTo] = useState(null); // timestamp
+  const [editingReview, setEditingReview] = useState(null); 
+  const [replyingTo, setReplyingTo] = useState(null); 
   const [replyText, setReplyText] = useState("");
-  const [editingReply, setEditingReply] = useState(null); // { reviewTimestamp, replyTimestamp, text }
+  const [editingReply, setEditingReply] = useState(null); 
 
   const chartData = [
-    { name: '원고 승소', value: judge.win_rate || 33, itemStyle: { color: '#3B82F6' } },
-    { name: '피고 승소', value: judge.lose_rate || 33, itemStyle: { color: '#EF4444' } },
-    { name: '조정/화해', value: judge.draw_rate || 34, itemStyle: { color: '#10B981' } }
+    { name: '원고 승소', value: judge?.win_rate || 33, itemStyle: { color: '#3B82F6' } },
+    { name: '피고 승소', value: judge?.lose_rate || 33, itemStyle: { color: '#EF4444' } },
+    { name: '조정/화해', value: judge?.draw_rate || 34, itemStyle: { color: '#10B981' } }
   ];
 
-  const bookmarkedUsers = judge.bookmarkedUsers || [];
+  const bookmarkedUsers = judge?.bookmarkedUsers || [];
   const isBookmarked = bookmarkedUsers.includes(user?.uid);
 
   useEffect(() => {
@@ -73,12 +72,12 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     }
   };
 
-  // 💡 AI 요약 업데이트 공통 함수 (3건 이상일 때 실행)
   const updateAISummaryIfNeeded = async (currentReviews) => {
-    if (currentReviews.length >= 3) {
+    const validReviews = currentReviews.filter(r => r && r.comment); // 💡 null 필터링
+    if (validReviews.length >= 3) {
       const ACTUAL_GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY; 
       if (!ACTUAL_GEMINI_API_KEY) return;
-      const prompt = `다음은 ${judge.name} 판사에 대한 리뷰입니다. 이 리뷰들의 공통적인 내용과 판사의 재판 성향을 3줄로 객관적으로 요약해주세요:\n\n${currentReviews.map(r => r.comment).join("\n")}`;
+      const prompt = `다음은 ${judge.name} 판사에 대한 리뷰입니다. 이 리뷰들의 공통적인 내용과 판사의 재판 성향을 3줄로 객관적으로 요약해주세요:\n\n${validReviews.map(r => r.comment).join("\n")}`;
       try {
         const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${ACTUAL_GEMINI_API_KEY}`, { 
           method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -99,24 +98,21 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
       const updatedReviews = [...(judge.reviews || []), { rating, comment: reviewText, timestamp: new Date().toISOString(), userName: user.displayName || "익명", uid: user.uid, likes: 0, likedUsers: [], replies: [] }];
       await updateDoc(doc(db, "judges", judge.id), { reviews: arrayUnion(updatedReviews[updatedReviews.length-1]) });
       setReviewText(""); setIsKeyboardActive(false); showToast("소중한 리뷰가 등록되었습니다.");
-      
-      // AI 요약 업데이트 호출
       await updateAISummaryIfNeeded(updatedReviews);
     } catch (e) { showToast("리뷰 등록 실패", "error"); }
   };
 
   const submitEditReview = async (rev) => {
-    if (!editingReview.text.trim()) return showToast("내용을 입력해주세요.", "error");
+    if (!editingReview?.text?.trim()) return showToast("내용을 입력해주세요.", "error");
     try {
-      const updatedReviews = judge.reviews.map(r => {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
         if (r.uid === rev.uid && r.timestamp === rev.timestamp) return { ...r, comment: editingReview.text, isEdited: true };
         return r;
       });
       await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
       setEditingReview(null); setIsKeyboardActive(false);
       showToast("리뷰가 수정되었습니다.");
-      
-      // 💡 리뷰 수정 시에도 AI 요약 최신화 호출
       await updateAISummaryIfNeeded(updatedReviews);
     } catch (e) { showToast("리뷰 수정 실패", "error"); }
   };
@@ -124,7 +120,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
   const handleDeleteReview = async (rev) => {
     if (!window.confirm("정말 이 리뷰를 삭제하시겠습니까?")) return;
     try {
-      const updatedReviews = judge.reviews.filter(r => r.timestamp !== rev.timestamp || r.uid !== rev.uid);
+      const updatedReviews = (judge.reviews || []).filter(r => r && (r.timestamp !== rev.timestamp || r.uid !== rev.uid));
       await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
       showToast("리뷰가 삭제되었습니다.");
     } catch (e) { showToast("리뷰 삭제 실패", "error"); }
@@ -135,7 +131,8 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     const likedUsers = rev.likedUsers || [];
     const isReviewLiked = likedUsers.includes(user.uid);
     try {
-      const updatedReviews = judge.reviews.map(r => {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
         if (r.uid === rev.uid && r.timestamp === rev.timestamp) {
           if (isReviewLiked) return { ...r, likes: Math.max(0, (r.likes || 1) - 1), likedUsers: likedUsers.filter(id => id !== user.uid) };
           else return { ...r, likes: (r.likes || 0) + 1, likedUsers: [...likedUsers, user.uid] };
@@ -150,7 +147,8 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     if (!replyText.trim()) return showToast("답글 내용을 입력해주세요.", "error");
     try {
       const newReply = { uid: user.uid, userName: user.displayName || "익명", text: replyText, timestamp: new Date().toISOString() };
-      const updatedReviews = judge.reviews.map(r => {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
         if (r.timestamp === targetRev.timestamp && r.uid === targetRev.uid) {
           return { ...r, replies: [...(r.replies || []), newReply] };
         }
@@ -162,13 +160,13 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     } catch (e) { showToast("답글 등록 실패", "error"); }
   };
 
-  // 💡 답글 삭제 함수
   const handleDeleteReply = async (rev, replyToDel) => {
     if (!window.confirm("정말 이 답글을 삭제하시겠습니까?")) return;
     try {
-      const updatedReviews = judge.reviews.map(r => {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
         if (r.timestamp === rev.timestamp && r.uid === rev.uid) {
-          return { ...r, replies: r.replies.filter(reply => reply.timestamp !== replyToDel.timestamp) };
+          return { ...r, replies: (r.replies || []).filter(reply => reply && reply.timestamp !== replyToDel.timestamp) };
         }
         return r;
       });
@@ -177,13 +175,14 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
     } catch (e) { showToast("답글 삭제 실패", "error"); }
   };
 
-  // 💡 답글 수정 완료 함수
   const submitEditReply = async (rev, replyToEdit) => {
-    if (!editingReply.text.trim()) return showToast("내용을 입력해주세요.", "error");
+    if (!editingReply?.text?.trim()) return showToast("내용을 입력해주세요.", "error");
     try {
-      const updatedReviews = judge.reviews.map(r => {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
         if (r.timestamp === rev.timestamp && r.uid === rev.uid) {
-          const updatedReplies = r.replies.map(reply => {
+          const updatedReplies = (r.replies || []).map(reply => {
+            if (!reply) return reply;
             if (reply.timestamp === replyToEdit.timestamp) return { ...reply, text: editingReply.text, isEdited: true };
             return reply;
           });
@@ -218,13 +217,13 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
           <div className="flex-1 overflow-y-auto px-5 custom-scrollbar pb-4 animate-fade-in">
             <div className="bg-slate-50 p-4 rounded-xl mt-3 mb-4 border border-slate-100 relative overflow-hidden">
               <div className="relative z-10">
-                <p className="text-[11px] font-semibold text-slate-500 mb-1">{judge.region} • {judge.department}</p>
-                <p className="text-xl font-extrabold text-slate-800">{judge.name} <span className="text-xs font-medium text-slate-600">{judge.title}</span></p>
-                <p className="text-xs text-slate-600 mt-2">💼 {judge.career || '경력 정보 없음'}</p>
+                <p className="text-[11px] font-semibold text-slate-500 mb-1">{judge?.region} • {judge?.department}</p>
+                <p className="text-xl font-extrabold text-slate-800">{judge?.name} <span className="text-xs font-medium text-slate-600">{judge?.title}</span></p>
+                <p className="text-xs text-slate-600 mt-2">💼 {judge?.career || '경력 정보 없음'}</p>
               </div>
             </div>
 
-            {judge.ai_summary && (
+            {judge?.ai_summary && (
               <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl mb-4">
                 <p className="text-[12px] font-bold text-indigo-800 flex items-center gap-1 mb-2"><Bot size={14}/> 리뷰 기반 AI 요약</p>
                 <p className="text-[13px] text-indigo-900 leading-relaxed whitespace-pre-wrap">{judge.ai_summary}</p>
@@ -241,21 +240,22 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
             </div>
 
             <div className="grid grid-cols-3 text-center text-[10px] font-bold mb-6 gap-2 border-b border-slate-100 pb-4 mt-2">
-              <div className="bg-blue-50 text-blue-700 p-2 rounded-xl">원고 승소<br/><span className="text-sm">{judge.win_rate || 0}%</span></div>
-              <div className="bg-red-50 text-red-700 p-2 rounded-xl">피고 승소<br/><span className="text-sm">{judge.lose_rate || 0}%</span></div>
-              <div className="bg-emerald-50 text-emerald-700 p-2 rounded-xl">조정/화해<br/><span className="text-sm">{judge.draw_rate || 0}%</span></div>
+              <div className="bg-blue-50 text-blue-700 p-2 rounded-xl">원고 승소<br/><span className="text-sm">{judge?.win_rate || 0}%</span></div>
+              <div className="bg-red-50 text-red-700 p-2 rounded-xl">피고 승소<br/><span className="text-sm">{judge?.lose_rate || 0}%</span></div>
+              <div className="bg-emerald-50 text-emerald-700 p-2 rounded-xl">조정/화해<br/><span className="text-sm">{judge?.draw_rate || 0}%</span></div>
             </div>
 
             <div className="mb-2">
               <h3 className="text-[13px] font-bold text-slate-700 mb-3 px-1 flex justify-between items-center">
-                시민 평가 내역 <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{judge.reviews?.length || 0}건</span>
+                시민 평가 내역 <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{(judge.reviews || []).filter(Boolean).length}건</span>
               </h3>
               {(!judge.reviews || judge.reviews.length === 0) ? (
                 <p className="text-center text-xs text-slate-400 py-4 bg-slate-50 rounded-xl border border-slate-100">등록된 리뷰가 없습니다.</p>
               ) : (
                 <div className="space-y-4">
-                  {[...judge.reviews].reverse().map((rev, idx) => {
-                    const authorBadge = getUserBadge(allJudges.reduce((acc, j) => acc + (j.reviews?.filter(r => r.uid === rev.uid).length || 0), 0));
+                  {/* 💡 찌꺼기 데이터가 있어도 크러시 나지 않게 필터링(.filter(Boolean)) 적용 */}
+                  {[...judge.reviews].filter(Boolean).reverse().map((rev, idx) => {
+                    const authorBadge = getUserBadge(allJudges.reduce((acc, j) => acc + (j.reviews?.filter(r => r?.uid === rev.uid).length || 0), 0)) || { icon: '', text: '시민', color: 'bg-slate-100 text-slate-500' };
                     const isReviewLiked = rev.likedUsers?.includes(user?.uid);
                     const isMyReview = user?.uid === rev.uid;
                     const isEditing = editingReview?.timestamp === rev.timestamp;
@@ -265,7 +265,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                       <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
                         <div className="flex justify-between items-center mb-1.5">
                           <div className="flex items-center gap-2">
-                            <div className="flex items-center">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
+                            <div className="flex items-center">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= (rev.rating || 5) ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
                             <span className="text-[10px] font-bold text-slate-700">{rev.userName?.split(' ')[0] || "익명"}</span>
                             <span className={`text-[8px] px-1.5 py-0.5 rounded-sm ${authorBadge.color}`}>{authorBadge.icon} {authorBadge.text}</span>
                           </div>
@@ -273,7 +273,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                             <span className="text-[9px] text-slate-400 font-medium">{formatDate(rev.timestamp)} {rev.isEdited && '(수정됨)'}</span>
                             {isMyReview && !isEditing && (
                               <div className="flex items-center gap-1.5">
-                                <button onClick={() => setEditingReview({ timestamp: rev.timestamp, text: rev.comment })} className="text-slate-400 hover:text-blue-500"><Edit2 size={12} /></button>
+                                <button onClick={() => setEditingReview({ timestamp: rev.timestamp, text: rev.comment || '' })} className="text-slate-400 hover:text-blue-500"><Edit2 size={12} /></button>
                                 <button onClick={() => handleDeleteReview(rev)} className="text-slate-400 hover:text-red-500"><Trash2 size={12} /></button>
                               </div>
                             )}
@@ -284,7 +284,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                           <div className="mt-2 mb-2 relative">
                             <textarea 
                               className="w-full p-2.5 pr-10 border border-blue-300 rounded-lg text-[12px] bg-blue-50/30 outline-none resize-none" 
-                              rows="2" value={editingReview.text} 
+                              rows="2" value={editingReview?.text || ''} 
                               onChange={(e) => setEditingReview({ ...editingReview, text: e.target.value })}
                               onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
                             />
@@ -326,18 +326,18 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
 
                         {rev.replies && rev.replies.length > 0 && (
                           <div className="mt-3 pl-2 border-l-2 border-slate-200 space-y-2">
-                            {rev.replies.map((reply, rIdx) => {
-                              const isMyReply = user?.uid === reply.uid;
-                              const isEditingReply = editingReply?.reviewTimestamp === rev.timestamp && editingReply?.replyTimestamp === reply.timestamp;
+                            {/* 💡 찌꺼기 답글 방어 */}
+                            {rev.replies.filter(Boolean).map((reply, rIdx) => {
+                              const isMyReply = user?.uid === reply?.uid;
+                              const isEditingReply = editingReply?.reviewTimestamp === rev.timestamp && editingReply?.replyTimestamp === reply?.timestamp;
 
                               return (
                                 <div key={rIdx} className="bg-slate-50 p-2 rounded-lg ml-2 relative">
                                   <div className="flex justify-between items-center mb-1">
                                     <div className="flex items-center gap-2">
-                                      <span className="text-[10px] font-bold text-slate-700">{reply.userName}</span>
-                                      <span className="text-[8px] text-slate-400">{formatDate(reply.timestamp)} {reply.isEdited && '(수정됨)'}</span>
+                                      <span className="text-[10px] font-bold text-slate-700">{reply?.userName || "익명"}</span>
+                                      <span className="text-[8px] text-slate-400">{formatDate(reply?.timestamp)} {reply?.isEdited && '(수정됨)'}</span>
                                     </div>
-                                    {/* 💡 내 답글일 경우 수정/삭제 버튼 노출 */}
                                     {isMyReply && !isEditingReply && (
                                       <div className="flex items-center gap-1.5">
                                         <button onClick={() => setEditingReply({ reviewTimestamp: rev.timestamp, replyTimestamp: reply.timestamp, text: reply.text })} className="text-slate-400 hover:text-indigo-500"><Edit2 size={10} /></button>
@@ -346,12 +346,11 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                                     )}
                                   </div>
                                   
-                                  {/* 💡 답글 수정 입력창 */}
                                   {isEditingReply ? (
                                     <div className="mt-1 relative">
                                       <textarea 
                                         className="w-full p-2 border border-indigo-300 rounded-md text-[11px] bg-indigo-50/30 outline-none resize-none" 
-                                        rows="1" value={editingReply.text} 
+                                        rows="1" value={editingReply?.text || ''} 
                                         onChange={(e) => setEditingReply({ ...editingReply, text: e.target.value })}
                                         onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
                                       />
@@ -361,7 +360,7 @@ export default function JudgeDetailModal({ judge, allJudges, user, onClose, show
                                       </div>
                                     </div>
                                   ) : (
-                                    <p className="text-[11px] text-slate-600 leading-snug">{reply.text}</p>
+                                    <p className="text-[11px] text-slate-600 leading-snug">{reply?.text}</p>
                                   )}
                                 </div>
                               );
