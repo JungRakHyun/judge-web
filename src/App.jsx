@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-// 💡 팝업과 리디렉션을 환경에 맞게 안전하게 하이브리드로 사용합니다.
-import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged } from 'firebase/auth';
+// 💡 리디렉션 삭제. 빠르고 확실한 팝업(Popup)으로 완전 복구
+import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 
 import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
@@ -34,7 +34,7 @@ export default function JudgeMapApp() {
   
   const [showSplash, setShowSplash] = useState(true);
   const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); // 💡 인증 대기 방어막
+  const [isAuthLoading, setIsAuthLoading] = useState(true); 
   const [currentTab, setCurrentTab] = useState('map'); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
@@ -79,34 +79,13 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 💡 [레이스 컨디션 해결] 구글 로그인 창에서 돌아온 결과를 완벽하게 정산한 뒤 화면을 오픈합니다.
+  // 💡 앱 실행 시 인증 상태만 깔끔하게 확인합니다.
   useEffect(() => {
-    let isMounted = true;
-    let unsubscribe;
-
-    const initializeAuth = async () => {
-      try {
-        // 1단계: 배포 환경에서 리디렉션으로 돌아온 경우, 토큰 해독이 완벽히 끝날 때까지 대기(await)합니다.
-        await getRedirectResult(auth);
-      } catch (error) {
-        console.error("인증 토큰 정산 에러:", error);
-      }
-
-      // 2단계: 백그라운드 정산이 끝난 시점에서 유저 상태 감지기를 부착합니다.
-      if (isMounted) {
-        unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-          setUser(currentUser);
-          setIsAuthLoading(false); // ✨ 모든 검증이 끝난 바로 이 순간에 로딩 화면을 제거합니다.
-        });
-      }
-    };
-
-    initializeAuth();
-
-    return () => {
-      isMounted = false;
-      if (unsubscribe) unsubscribe();
-    };
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -200,24 +179,21 @@ export default function JudgeMapApp() {
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
   }, [currentTab, showSplash]);
 
-  // 💡 [환경 맞춤 분기] 로컬과 배포 서버를 스스로 감지하여 가장 알맞은 보안 우회 경로를 탑니다.
+  // 💡 [핵심 해결 로직] 딜레이 없이 팝업을 즉시 호출하여 브라우저 차단 우회
   const handleLogin = () => {
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-
-    if (isLocal) {
-      // 로컬 개발 환경: 직관적이고 빠른 순정 팝업 사용
-      setIsAuthLoading(true);
-      signInWithPopup(auth, googleProvider)
-        .then((result) => {
-          setUser(result.user);
-          showToast("로그인 성공!");
-        })
-        .catch((err) => console.error(err))
-        .finally(() => setIsAuthLoading(false));
-    } else {
-      // Vercel 배포 환경: 유저 제스처 타이밍을 깨뜨리지 않기 위해 상태 변경 없이 '즉시' 페이지 이동
-      signInWithRedirect(auth, googleProvider);
-    }
+    // 🚨 절대 이 위치에 setIsAuthLoading(true) 같은 로딩창 코드를 넣지 마세요! (모바일 팝업 차단의 원흉)
+    signInWithPopup(auth, googleProvider)
+      .then((result) => {
+        setUser(result.user);
+        showToast("로그인 성공!");
+      })
+      .catch((error) => {
+        if (error.code === 'auth/popup-blocked') {
+          alert("⚠️ 팝업이 차단되었습니다! 카카오톡 등 앱 내부 브라우저가 아닌 일반 '크롬'이나 '사파리' 앱을 직접 켜서 접속해주세요.");
+        } else if (error.code !== 'auth/popup-closed-by-user') {
+          alert("로그인 실패: " + error.message);
+        }
+      });
   };
 
   const handleLogout = async () => {
@@ -295,6 +271,7 @@ export default function JudgeMapApp() {
         </div>
       </header>
 
+      {/* ==================== 1. 지도 탭 ==================== */}
       {currentTab === 'map' && (
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
@@ -346,6 +323,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
+      {/* ==================== 2. 검색 탭 ==================== */}
       {currentTab === 'search' && (
         <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50">
           <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -390,6 +368,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
+      {/* ==================== 3. 등록 탭 ==================== */}
       {currentTab === 'register' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
@@ -430,6 +409,7 @@ export default function JudgeMapApp() {
         </div>
       )}
 
+      {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
         <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
           {!user ? (
