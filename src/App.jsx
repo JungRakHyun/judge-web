@@ -92,7 +92,6 @@ export default function JudgeMapApp() {
 
   useEffect(() => {
     // 1. 앱 실행 직후 바로 뒤로가기 시 튕기는 현상 해결 (루트 2 완벽 대응)
-    // 🚨 기존 replaceState를 pushState로 변경! 
     // 바닥 기록을 지우지 않고 방어막(exit_trap)을 안전하게 한 겹 씌워야 앱이 바로 안 꺼집니다.
     if (!window.history.state || window.history.state.step !== 'main') {
       window.history.pushState({ step: 'exit_trap' }, '');
@@ -378,7 +377,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.23</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.24</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
