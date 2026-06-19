@@ -26,7 +26,7 @@ const JudgeSkeletonCard = () => (
       </div>
       <div className="w-8 h-8 bg-slate-100 rounded-full"></div>
     </div>
-  </div>
+  </div> 
 );
 
 export default function JudgeMapApp() {
