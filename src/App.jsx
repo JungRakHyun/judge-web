@@ -85,23 +85,18 @@ export default function JudgeMapApp() {
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 하위 탭 무한 스택 적재 결함 방지를 위해 초기 베이스 스택만 할당
-    if (!window.history.state || !window.history.state.step) {
-      window.history.replaceState({ step: 'exit_trap' }, '');
+    if (!window.history.state) {
       window.history.pushState({ step: 'main' }, '');
     }
 
     const handlePopState = (e) => {
       const state = e.state;
 
-      // 💡 [수정] 앱 켜자마자 뒤로가기 시 state가 null이 되며 방어막을 뚫고 종료되는 버그 해결
       if (!state || state.step === 'exit_trap') {
-        // 하단 탭 내비게이션 상태에서 뒤로가기 감지 시 메인 맵으로 강제 복귀 처리
         if (currentTabRef.current !== 'map') {
           setCurrentTab('map');
           window.history.pushState({ step: 'main' }, '');
         } else {
-          // 메인 지도 루트 컨텍스트 진입 시 종료 더블클릭 타이머 가동
           const now = Date.now();
           if (now - lastBackPressRef.current < 2000) {
             window.history.back(); 
@@ -110,13 +105,11 @@ export default function JudgeMapApp() {
             showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
             window.history.pushState({ step: 'main' }, ''); 
             
-            // 레이스 컨디션 방지를 위한 명시적 핸들러 초기화
             setSelectedRegionName(null);
             setSelectedJudge(null);
           }
         }
       } else if (state.step === 'main') {
-        // 타 탭에서 뒤로가기 시 탭을 메인(map)으로 완전히 초기화
         setCurrentTab('map');
         setSelectedRegionName(null);
         setSelectedJudge(null);
@@ -125,7 +118,6 @@ export default function JudgeMapApp() {
         setSelectedRegionName(state.region);
         setSelectedJudge(null);
       } else if (state.step === 'tab') {
-        // 탭 간 뒤로가기 백트래킹 지원
         setCurrentTab(state.tab);
         setSelectedRegionName(null);
         setSelectedJudge(null);
@@ -136,7 +128,6 @@ export default function JudgeMapApp() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []); 
 
-  // 탭 전환 시 히스토리 스택 추가하여 뒤로가기 흐름 유지
   const handleTabChange = (tabName) => {
     if (currentTab === tabName) return;
     window.history.pushState({ step: 'tab', tab: tabName }, '');
@@ -253,9 +244,15 @@ export default function JudgeMapApp() {
             myChart = echarts.init(mapRef.current);
             echarts.registerMap('korea', geoJson);
             myChart.setOption({
+              // 줌인/줌아웃 시 부드럽게 이어지도록 트랜지션 옵션 추가
+              animationDurationUpdate: 300,
+              animationEasingUpdate: 'cubicInOut',
               tooltip: { show: false },
               series: [{
-                type: 'map', map: 'korea', roam: true, zoom: 1.45, center: [127.7, 36.3], selectedMode: 'single',
+                type: 'map', map: 'korea', roam: true, 
+                // 지도 최대 확대치(max)를 제한하여 핀치 줌이 너무 훅훅 들어가는 현상 제어
+                scaleLimit: { min: 1.45, max: 2.8 },
+                zoom: 1.45, center: [127.7, 36.3], selectedMode: 'single',
                 label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#94a3b8', formatter: (params) => regionMapping[params.name] || params.name },
                 itemStyle: { areaColor: '#1e293b', borderColor: '#334155', borderWidth: 1.5 },
                 emphasis: { label: { color: '#ffffff' }, itemStyle: { areaColor: '#3b82f6' } },
@@ -360,7 +357,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.16</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.17</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
