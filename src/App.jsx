@@ -12,7 +12,7 @@ import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
 import JudgeDetailModal from './components/JudgeDetailModal';
 import AdminEditModal from './components/AdminEditModal';
 
-// 데이터 로딩 컨텐츠 플레이스홀더
+// 초기 로딩용 스켈레톤 컴포넌트
 const JudgeSkeletonCard = () => (
   <div className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm animate-pulse">
     <div className="space-y-3">
@@ -32,22 +32,22 @@ const JudgeSkeletonCard = () => (
 export default function JudgeMapApp() {
   const mapRef = useRef(null);
   
-  // 백그라운드 프로세스 자원 회수 시 상태 보존을 위한 세션 스토리지 바인딩
+  // 세션 스토리지 기반 상태 복구 (OS에 의한 백그라운드 앱 강제 종료 시 대응)
   const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
   const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
   
-  // 이벤트 리스너 컨텍스트 안에서 최신 탭 상태 관리를 위한 Ref
+  // popstate 이벤트 리스너 내부에서 최신 상태를 참조하기 위한 Ref 바인딩
   const currentTabRef = useRef(currentTab);
   useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
   
-  // 인증 및 인스턴스 데이터 스토어
+  // Auth 및 데이터 전역 상태
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true); 
   const [judges, setJudges] = useState([]); 
   const [reports, setReports] = useState([]); 
   const [isLoadingData, setIsLoadingData] = useState(true);
   
-  // 팝업 레이어 제어용 상호 배제 상태값
+  // 계층형 뷰 렌더링(모달) 상태 (Ref 동기화 필수)
   const [selectedRegionName, setSelectedRegionName] = useState(null); 
   const selectedRegionRef = useRef(selectedRegionName);
   useEffect(() => { selectedRegionRef.current = selectedRegionName; }, [selectedRegionName]);
@@ -56,7 +56,7 @@ export default function JudgeMapApp() {
   const selectedJudgeRef = useRef(selectedJudge);
   useEffect(() => { selectedJudgeRef.current = selectedJudge; }, [selectedJudge]);
   
-  // 검색 및 필터 가공용 훅 상태
+  // UI 컨트롤 상태
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState("latest"); 
   const [mapStatus, setMapStatus] = useState("loading");
@@ -64,7 +64,7 @@ export default function JudgeMapApp() {
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [editModalJudge, setEditModalJudge] = useState(null);
 
-  // 스크롤 가상화 및 페이징 핸들러
+  // 인피니트 스크롤 상태
   const [displayCount, setDisplayCount] = useState(10);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const observer = useRef();
@@ -82,81 +82,54 @@ export default function JudgeMapApp() {
   const isAdmin = user?.email === 'jlh9809@gmail.com';
 
   // =====================================================================
-  // 💡 [핵심 수술] 기기 물리 뒤로가기 완벽 제어 엔진
+  // 단일 방어막(Single Trap) 기반 모바일 뒤로가기 제어
   // =====================================================================
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 1. 앱 실행 직후 바로 뒤로가기 시 튕기는 현상 해결 (루트 2 완벽 대응)
-    // 앱이 처음 켜질 때 '방어막(exit_trap)' 스택과 '메인(main)' 스택을 강제로 채워넣습니다.
-    if (!window.history.state || window.history.state.step !== 'main') {
-      window.history.replaceState({ step: 'exit_trap' }, '');
-      window.history.pushState({ step: 'main', tab: currentTabRef.current }, '');
-    }
+    // 앱 진입 시 브라우저 히스토리 스택에 가상의 방어막 1개를 강제 추가합니다.
+    window.history.pushState(null, '', window.location.href);
 
-    const handlePopState = (e) => {
-      const state = e.state;
+    const handlePopState = () => {
+      // 기기 뒤로가기가 발생하면 앱 이탈을 막기 위해 즉시 방어막을 리필합니다.
+      window.history.pushState(null, '', window.location.href);
 
-      // state가 없거나 exit_trap에 도달한 경우 (모든 팝업이 닫힌 바닥 상태)
-      if (!state || state.step === 'exit_trap') {
+      // 최상위 뷰부터 역순으로 상태를 해제하여 모달을 닫습니다.
+      if (selectedJudgeRef.current) {
+        setSelectedJudge(null);
+      } else if (selectedRegionRef.current) {
+        setSelectedRegionName(null);
+      } else if (currentTabRef.current !== 'map') {
+        setCurrentTab('map');
+      } else {
+        // 모든 창이 닫힌 메인 화면일 때 앱 종료 로직 작동
         const now = Date.now();
         if (now - lastBackPressRef.current < 2000) {
-          // 2초 내에 한 번 더 누르면 앱 찐으로 종료
+          // 2초 내 더블클릭 시 방어막을 제거하고 실제 브라우저 뒤로가기 실행(종료)
+          window.removeEventListener('popstate', handlePopState);
           window.history.back(); 
         } else {
-          // 처음 누른 거면 종료 안내 메시지 띄우고 다시 방어막(main 스택) 리필
           lastBackPressRef.current = now;
           showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-          window.history.pushState({ step: 'main', tab: currentTabRef.current }, ''); 
-          
-          setSelectedRegionName(null);
-          setSelectedJudge(null);
         }
-      } 
-      // 뒤로가기를 눌러 '메인' 스택으로 빠져나온 경우 (팝업에서 메인 복귀)
-      else if (state.step === 'main') {
-        setCurrentTab('map');
-        setSelectedRegionName(null);
-        setSelectedJudge(null);
-      } 
-      // 뒤로가기를 눌러 '지역 리스트' 스택으로 빠져나온 경우 (상세에서 리스트 복귀)
-      else if (state.step === 'region') {
-        setCurrentTab('map');
-        setSelectedRegionName(state.region);
-        setSelectedJudge(null);
-      } 
-      // 뒤로가기를 눌러 '타 탭' 스택으로 빠져나온 경우
-      else if (state.step === 'tab') {
-        setCurrentTab(state.tab);
-        setSelectedRegionName(null);
-        setSelectedJudge(null);
       }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []); 
+  // =====================================================================
 
-  // 2. 탭 무한 꼬임 현상 해결 (루트 3 완벽 대응)
+  // 하단 네비게이션 탭 전환 제어
   const handleTabChange = (tabName) => {
     if (currentTab === tabName) return;
-    
-    // 현재 지도를 보고 있었다면 스택을 1개 '추가'합니다. (지도 -> 타 탭)
-    if (currentTabRef.current === 'map') {
-      window.history.pushState({ step: 'tab', tab: tabName }, '');
-    } 
-    // 이미 다른 탭을 보고 있다면 스택을 추가하지 않고 '교체'만 합니다. (타 탭 -> 타 탭 100번 이동 방어)
-    else {
-      window.history.replaceState({ step: 'tab', tab: tabName }, '');
-    }
-    
+    // 탭 전환 시 히스토리 스택을 쌓지 않으므로, 100번 이동해도 뒤로가기 1번으로 메인 복귀 가능
     setCurrentTab(tabName);
     setSelectedRegionName(null);
     setSelectedJudge(null);
   };
-  // =====================================================================
 
-  // 인트로 애니메이션 기동 조건 절
+  // 인트로 스플래시 타이머
   useEffect(() => { 
     if (showSplash) {
       setTimeout(() => {
@@ -170,7 +143,7 @@ export default function JudgeMapApp() {
     sessionStorage.setItem('currentTab', currentTab);
   }, [currentTab]);
 
-  // 시스템 소프트 키보드 활성화 시 인풋 영역 시야 확보 세팅
+  // 안드로이드/iOS 가상 키보드 호출에 따른 레이아웃 리사이징 보정
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -182,7 +155,7 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 파이어베이스 실시간 사용자 인스턴스 갱신
+  // Firebase Auth 리스너
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -195,7 +168,7 @@ export default function JudgeMapApp() {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-  // 외부 도메인 유입 라우팅 딥링크 처리
+  // 카카오톡 등 외부 공유 링크 딥링킹 접속 처리
   useEffect(() => {
     if (judges.length > 0) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -204,15 +177,15 @@ export default function JudgeMapApp() {
       if (targetJudgeId && !selectedJudge) {
         const targetJudge = judges.find(j => j.id === targetJudgeId);
         if (targetJudge) {
-          window.history.pushState({ step: 'judge', judgeId: targetJudge.id }, ''); 
           setSelectedJudge(targetJudge); 
-          window.history.replaceState({ step: 'judge' }, document.title, window.location.pathname);
+          // URL 표시만 변경하고 스택은 늘리지 않음
+          window.history.replaceState(null, document.title, window.location.pathname);
         }
       }
     }
   }, [judges]);
   
-  // 스크롤 바운더리 감지형 페이징 데이터 인덱싱
+  // 리스트 하단 DOM 관측을 통한 무한 스크롤
   const lastElementRef = useCallback(node => {
     if (isLoadingData) return;
     if (observer.current) observer.current.disconnect();
@@ -248,7 +221,7 @@ export default function JudgeMapApp() {
     return () => { unsubJudges(); unsubReports(); };
   }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
-  // 대한민국 지도 인스턴스 셋업
+  // 대한민국 지도 인스턴스 셋업 및 핀치 줌 감도 튜닝
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
     
@@ -264,13 +237,14 @@ export default function JudgeMapApp() {
             myChart = echarts.init(mapRef.current);
             echarts.registerMap('korea', geoJson);
             myChart.setOption({
-              // 💡 지도 애니메이션 효과 제거 (손가락에 정직하게 1:1로만 작동하도록 튜닝)
-              animation: false,
+              // 부드러운 전환을 적용하여 확 커지는 가속 현상을 억제
+              animationDurationUpdate: 300,
+              animationEasingUpdate: 'cubicOut',
               tooltip: { show: false },
               series: [{
                 type: 'map', map: 'korea', roam: true, 
-                // 💡 최대 확대치를 15배로 대폭 늘려줌 (원하는 곳을 깊게 줌인 가능)
-                scaleLimit: { min: 1.45, max: 15.0 }, 
+                // 최대 줌 배율을 4.5배로 제한하여 살짝 터치해도 끝까지 확대되는 현상 방지
+                scaleLimit: { min: 1.45, max: 4.5 }, 
                 zoom: 1.45, center: [127.7, 36.3], selectedMode: 'single',
                 label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#94a3b8', formatter: (params) => regionMapping[params.name] || params.name },
                 itemStyle: { areaColor: '#1e293b', borderColor: '#334155', borderWidth: 1.5 },
@@ -283,7 +257,6 @@ export default function JudgeMapApp() {
                 params.event.stop(); 
               }
               const region = regionMapping[params.name] || params.name;
-              window.history.pushState({ step: 'region', region }, '');
               setSelectedRegionName(region);
               setSelectedJudge(null);
             });
@@ -305,7 +278,7 @@ export default function JudgeMapApp() {
       })
       .catch((error) => {
         if (error.code === 'auth/popup-blocked') {
-          alert("⚠️ 팝업이 차단되었습니다! 카카오톡 등 앱 내부 브라우저가 아닌 일반 '크롬'이나 '사파리' 앱을 직접 켜서 접속해주세요.");
+          alert("팝업이 차단되었습니다! 카카오톡 등 인앱 브라우저 대신 사파리나 크롬을 이용해주세요.");
         } else if (error.code !== 'auth/popup-closed-by-user') {
           alert("로그인 실패: " + error.message);
         }
@@ -376,7 +349,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.21</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.22</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
@@ -392,7 +365,8 @@ export default function JudgeMapApp() {
         <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
           <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
             {mapStatus === "loading" && <p className="text-blue-400 text-sm font-bold animate-pulse absolute z-0">지도를 불러오는 중...</p>}
-            <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
+            {/* touchAction: none 할당으로 브라우저 네이티브 더블탭/핀치줌과 ECharts의 충돌 원천 차단 */}
+            <div ref={mapRef} style={{ width: '100%', height: '100%', touchAction: 'none', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
           </div>
           <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-300 px-4 py-1.5 rounded-full text-[11px] font-bold pointer-events-none shadow-lg whitespace-nowrap">지역을 터치하거나 줌인하세요</div>
 
@@ -401,40 +375,42 @@ export default function JudgeMapApp() {
               <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
                 <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
                   <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
-                  <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
+                  {/* 단일 방어막 로직에 맞춰 닫기 버튼은 직접 상태를 조작 */}
+                  <button onClick={() => setSelectedRegionName(null)} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
-                  {isLoadingData ? (
-                    <div className="flex flex-col gap-3">
-                      {[1, 2, 3, 4].map(i => <JudgeSkeletonCard key={i} />)}
-                    </div>
-                  ) : regionJudges.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-slate-200">
-                      <p className="text-sm font-bold text-slate-500 mb-3">등록된 데이터가 없습니다.</p>
-                      <button onClick={() => { handleTabChange('register'); }} className="text-xs bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700">신규 등록하기</button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {regionJudges.slice(0, displayCount).map(j => (
-                        <div key={j.id} onClick={() => {
-                          window.history.pushState({ step: 'judge', judgeId: j.id, tab: currentTabRef.current }, '');
-                          setSelectedJudge(j);
-                        }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
-                          <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
-                            <div className="text-slate-300 bg-slate-50 p-1.5 rounded-full group-hover:bg-blue-100 group-hover:text-blue-600"><ChevronRight size={18} /></div>
+                <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar overscroll-y-contain">
+                  <div className="min-h-[calc(100%+1px)] flex flex-col gap-3">
+                    {isLoadingData ? (
+                      <div className="flex flex-col gap-3">
+                        {[1, 2, 3, 4].map(i => <JudgeSkeletonCard key={i} />)}
+                      </div>
+                    ) : regionJudges.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-slate-200">
+                        <p className="text-sm font-bold text-slate-500 mb-3">등록된 데이터가 없습니다.</p>
+                        <button onClick={() => { handleTabChange('register'); }} className="text-xs bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700">신규 등록하기</button>
+                      </div>
+                    ) : (
+                      <>
+                        {regionJudges.slice(0, displayCount).map(j => (
+                          <div key={j.id} onClick={() => {
+                            setSelectedJudge(j);
+                          }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
+                            <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
+                              <div className="text-slate-300 bg-slate-50 p-1.5 rounded-full group-hover:bg-blue-100 group-hover:text-blue-600"><ChevronRight size={18} /></div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                      {displayCount < regionJudges.length && (
-                        <div ref={lastElementRef} className="py-4 flex justify-center w-full">
-                          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        ))}
+                        {displayCount < regionJudges.length && (
+                          <div ref={lastElementRef} className="py-4 flex justify-center w-full">
+                            <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -456,154 +432,158 @@ export default function JudgeMapApp() {
               <button onClick={() => setSortOption('reviews')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'reviews' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>💬 리뷰많은순</button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar touch-auto">
-            {isLoadingData ? (
-              <div className="flex flex-col gap-3 pb-6">
-                {[1, 2, 3, 4, 5].map(i => <JudgeSkeletonCard key={i} />)}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3 pb-6">
-                {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
-                  <>
-                    {searchedJudges.slice(0, displayCount).map(j => (
-                      <div key={j.id} onClick={() => {
-                        window.history.pushState({ step: 'judge', judgeId: j.id, tab: currentTabRef.current }, '');
-                        setSelectedJudge(j);
-                      }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
-                        <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
-                          <ChevronRight size={18} className="text-slate-300" />
+          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar touch-auto overscroll-y-contain">
+            <div className="min-h-[calc(100%+1px)] flex flex-col gap-3 pb-6">
+              {isLoadingData ? (
+                <div className="flex flex-col gap-3 pb-6">
+                  {[1, 2, 3, 4, 5].map(i => <JudgeSkeletonCard key={i} />)}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 pb-6">
+                  {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
+                    <>
+                      {searchedJudges.slice(0, displayCount).map(j => (
+                        <div key={j.id} onClick={() => {
+                          setSelectedJudge(j);
+                        }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
+                          <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
+                            <ChevronRight size={18} className="text-slate-300" />
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    {displayCount < searchedJudges.length && (
-                      <div ref={lastElementRef} className="py-4 flex justify-center w-full">
-                        <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+                      ))}
+                      {displayCount < searchedJudges.length && (
+                        <div ref={lastElementRef} className="py-4 flex justify-center w-full">
+                          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* ==================== 3. 등록 탭 ==================== */}
       {currentTab === 'register' && (
-        <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
-            <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2"><PlusCircle className="text-blue-600" /> 신규 데이터 등록</h2>
-            {!user ? (
-               <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 text-center"><LogIn className="text-slate-400 mb-3" size={28} /><p className="text-[15px] font-bold text-slate-700 mb-2">등록 권한이 없습니다.</p><button onClick={handleLogin} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold mt-2">구글로 로그인</button></div>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">이름</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500" value={newJudge.name} onChange={e=>setNewJudge({...newJudge, name: e.target.value})} placeholder="홍길동" /></div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">직급</label><select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.title} onChange={e=>setNewJudge({...newJudge, title: e.target.value})}><option>판사</option><option>부장판사</option><option>수석부장판사</option><option>법원장</option></select></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">관할 지역</label>
-                    <select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.region} onChange={e=>setNewJudge({...newJudge, region: e.target.value})}>
-                      {Object.values(regionMapping).filter((v,i,a)=>a.indexOf(v)===i).map(r=><option key={r} value={r}>{r}</option>)}
-                    </select>
+        <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50 overscroll-y-contain">
+          <div className="min-h-[calc(100%+1px)]">
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
+              <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2"><PlusCircle className="text-blue-600" /> 신규 데이터 등록</h2>
+              {!user ? (
+                 <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 text-center"><LogIn className="text-slate-400 mb-3" size={28} /><p className="text-[15px] font-bold text-slate-700 mb-2">등록 권한이 없습니다.</p><button onClick={handleLogin} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold mt-2">구글로 로그인</button></div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">이름</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500" value={newJudge.name} onChange={e=>setNewJudge({...newJudge, name: e.target.value})} placeholder="홍길동" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">직급</label><select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.title} onChange={e=>setNewJudge({...newJudge, title: e.target.value})}><option>판사</option><option>부장판사</option><option>수석부장판사</option><option>법원장</option></select></div>
                   </div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">소속 법원</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.court} onChange={e=>setNewJudge({...newJudge, court: e.target.value})} placeholder="서울중앙지법" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">담당 부서</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.department} onChange={e=>setNewJudge({...newJudge, department: e.target.value})} placeholder="형사1부" /></div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">경력</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.career} onChange={e=>setNewJudge({...newJudge, career: e.target.value})} placeholder="연수원 30기" /></div>
-                </div>
-                <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                  <label className="block text-[11px] font-bold text-blue-800 mb-2">판결 성향 (%)</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div><label className="text-[10px] text-slate-500">원고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.win_rate} onChange={e=>setNewJudge({...newJudge, win_rate: e.target.value})} /></div>
-                    <div><label className="text-[10px] text-slate-500">피고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.lose_rate} onChange={e=>setNewJudge({...newJudge, lose_rate: e.target.value})} /></div>
-                    <div><label className="text-[10px] text-slate-500">조정/화해</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.draw_rate} onChange={e=>setNewJudge({...newJudge, draw_rate: e.target.value})} /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">관할 지역</label>
+                      <select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.region} onChange={e=>setNewJudge({...newJudge, region: e.target.value})}>
+                        {Object.values(regionMapping).filter((v,i,a)=>a.indexOf(v)===i).map(r=><option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">소속 법원</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.court} onChange={e=>setNewJudge({...newJudge, court: e.target.value})} placeholder="서울중앙지법" /></div>
                   </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">담당 부서</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.department} onChange={e=>setNewJudge({...newJudge, department: e.target.value})} placeholder="형사1부" /></div>
+                    <div><label className="block text-[11px] font-bold text-slate-600 mb-1">경력</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.career} onChange={e=>setNewJudge({...newJudge, career: e.target.value})} placeholder="연수원 30기" /></div>
+                  </div>
+                  <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                    <label className="block text-[11px] font-bold text-blue-800 mb-2">판결 성향 (%)</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div><label className="text-[10px] text-slate-500">원고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.win_rate} onChange={e=>setNewJudge({...newJudge, win_rate: e.target.value})} /></div>
+                      <div><label className="text-[10px] text-slate-500">피고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.lose_rate} onChange={e=>setNewJudge({...newJudge, lose_rate: e.target.value})} /></div>
+                      <div><label className="text-[10px] text-slate-500">조정/화해</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.draw_rate} onChange={e=>setNewJudge({...newJudge, draw_rate: e.target.value})} /></div>
+                    </div>
+                  </div>
+                  <button onClick={handleRegisterJudge} disabled={isSubmitting} className={`w-full text-white text-[13px] font-bold py-3.5 rounded-xl mt-4 transition-colors ${isSubmitting ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>{isSubmitting ? '처리 중...' : '등록하기'}</button>
                 </div>
-                <button onClick={handleRegisterJudge} disabled={isSubmitting} className={`w-full text-white text-[13px] font-bold py-3.5 rounded-xl mt-4 transition-colors ${isSubmitting ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>{isSubmitting ? '처리 중...' : '등록하기'}</button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}
 
       {/* ==================== 4. 마이페이지 탭 ==================== */}
       {currentTab === 'mypage' && (
-        <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
-          {!user ? (
-            <div className="h-full flex flex-col items-center justify-center p-8 text-center"><UserCircle className="text-slate-300 mb-4" size={48} /><p className="text-lg font-bold text-slate-700 mb-2">로그인이 필요합니다</p><button onClick={handleLogin} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md mt-4">구글로 로그인</button></div>
-          ) : (
-            <div>
-              <div className="bg-white p-6 border-b border-slate-200 shadow-sm flex items-center gap-5">
-                <img src={user.photoURL} alt="profile" className="w-16 h-16 rounded-full border border-slate-200 shadow-sm" />
-                <div>
-                  <div className="flex items-center gap-2 mb-1"><h2 className="text-xl font-extrabold text-slate-800">{user.displayName}</h2><span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${myBadge.color}`}>{myBadge.icon} {myBadge.text}</span></div>
-                  <p className="text-[11px] text-slate-500 mb-2">{user.email}</p>
-                  <div className="inline-block bg-slate-50 border border-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">작성한 리뷰 <span className="text-blue-600">{myReviews.length}</span>개</div>
+        <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar overscroll-y-contain">
+          <div className="min-h-[calc(100%+1px)]">
+            {!user ? (
+              <div className="h-full flex flex-col items-center justify-center p-8 text-center pt-[30%]"><UserCircle className="text-slate-300 mb-4" size={48} /><p className="text-lg font-bold text-slate-700 mb-2">로그인이 필요합니다</p><button onClick={handleLogin} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md mt-4">구글로 로그인</button></div>
+            ) : (
+              <div>
+                <div className="bg-white p-6 border-b border-slate-200 shadow-sm flex items-center gap-5">
+                  <img src={user.photoURL} alt="profile" className="w-16 h-16 rounded-full border border-slate-200 shadow-sm" />
+                  <div>
+                    <div className="flex items-center gap-2 mb-1"><h2 className="text-xl font-extrabold text-slate-800">{user.displayName}</h2><span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${myBadge.color}`}>{myBadge.icon} {myBadge.text}</span></div>
+                    <p className="text-[11px] text-slate-500 mb-2">{user.email}</p>
+                    <div className="inline-block bg-slate-50 border border-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">작성한 리뷰 <span className="text-blue-600">{myReviews.length}</span>개</div>
+                  </div>
                 </div>
-              </div>
 
-              {isAdmin && (
-                <div className="p-4 bg-indigo-50/50 border-b border-indigo-100">
-                  <h3 className="text-sm font-bold text-indigo-900 mb-3 px-1 flex items-center gap-1"><Settings size={16}/> 관리자: 전체 판사 데이터 ({judges.length})</h3>
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                    {judges.map(j => (
-                      <div key={j.id} className="bg-white border border-indigo-100 p-3 rounded-xl shadow-sm flex justify-between items-center">
-                        <div><p className="text-[11px] font-bold text-slate-500">{j.court}</p><p className="text-[13px] font-extrabold text-slate-800">{j.name} <span className="font-medium text-slate-500">{j.title}</span></p></div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setEditModalJudge(j)} className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1.5 rounded-lg hover:bg-indigo-100"><Edit size={12}/>수정</button>
-                          <button onClick={() => handleDeleteJudge(j.id, j.name)} className="flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-100"><Trash2 size={12}/>삭제</button>
+                {isAdmin && (
+                  <div className="p-4 bg-indigo-50/50 border-b border-indigo-100">
+                    <h3 className="text-sm font-bold text-indigo-900 mb-3 px-1 flex items-center gap-1"><Settings size={16}/> 관리자: 전체 판사 데이터 ({judges.length})</h3>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                      {judges.map(j => (
+                        <div key={j.id} className="bg-white border border-indigo-100 p-3 rounded-xl shadow-sm flex justify-between items-center">
+                          <div><p className="text-[11px] font-bold text-slate-500">{j.court}</p><p className="text-[13px] font-extrabold text-slate-800">{j.name} <span className="font-medium text-slate-500">{j.title}</span></p></div>
+                          <div className="flex gap-2">
+                            <button onClick={() => setEditModalJudge(j)} className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1.5 rounded-lg hover:bg-indigo-100"><Edit size={12}/>수정</button>
+                            <button onClick={() => handleDeleteJudge(j.id, j.name)} className="flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-100"><Trash2 size={12}/>삭제</button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
+                )}
+
+                <div className="p-4 pb-4">
+                  <h3 className="text-sm font-bold text-slate-800 mb-3 px-1">내가 작성한 리뷰</h3>
+                  {isLoadingData ? (
+                    <div className="space-y-3">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-24"></div>)}</div>
+                  ) : myReviews.length === 0 ? ( 
+                    <p className="text-center text-xs text-slate-400 py-10 bg-white rounded-xl border border-slate-200">아직 작성한 리뷰가 없습니다.</p> 
+                  ) : (
+                    <div className="space-y-3">
+                      {myReviews.map((rev, idx) => (
+                        <div key={idx} onClick={() => { 
+                          const judge = judges.find(j => j.id === rev.judgeId); 
+                          if(judge) {
+                            setSelectedJudge(judge); 
+                          }
+                        }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
+                          <div className="flex justify-between items-center mb-2"><p className="text-xs font-bold text-blue-600">{rev.court} • {rev.judgeName}</p><span className="text-[10px] text-slate-400">{formatDate(rev.timestamp)}</span></div>
+                          <div className="flex items-center mb-1.5 gap-1">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
+                          <p className="text-[13px] text-slate-700">{rev.comment}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
 
-              <div className="p-4 pb-4">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1">내가 작성한 리뷰</h3>
-                {isLoadingData ? (
-                  <div className="space-y-3">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-24"></div>)}</div>
-                ) : myReviews.length === 0 ? ( 
-                  <p className="text-center text-xs text-slate-400 py-10 bg-white rounded-xl border border-slate-200">아직 작성한 리뷰가 없습니다.</p> 
-                ) : (
-                  <div className="space-y-3">
-                    {myReviews.map((rev, idx) => (
-                      <div key={idx} onClick={() => { 
-                        const judge = judges.find(j => j.id === rev.judgeId); 
-                        if(judge) {
-                          window.history.pushState({ step: 'judge', judgeId: judge.id, tab: currentTabRef.current }, '');
-                          setSelectedJudge(judge); 
-                        }
-                      }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
-                        <div className="flex justify-between items-center mb-2"><p className="text-xs font-bold text-blue-600">{rev.court} • {rev.judgeName}</p><span className="text-[10px] text-slate-400">{formatDate(rev.timestamp)}</span></div>
-                        <div className="flex items-center mb-1.5 gap-1">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
-                        <p className="text-[13px] text-slate-700">{rev.comment}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="p-4 pb-20 border-t border-slate-200 border-dashed">
+                  <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 flex items-center gap-1"><ShieldAlert size={16} className="text-red-500" /> 내 신고 내역</h3>
+                  {reports.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-6 bg-white rounded-xl border border-slate-200">접수된 신고 내역이 없습니다.</p> ) : (
+                    <div className="space-y-2">
+                      {reports.map((rep, idx) => (
+                        <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
+                          <div className="flex justify-between items-center mb-1"><span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">{rep.category}</span><span className="text-[10px] font-bold text-slate-500">{rep.status}</span></div>
+                          <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">사유: {rep.reason}</p><p className="text-[9px] text-slate-400 mt-2">{formatDate(rep.reportedAt)} 접수됨</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-
-              <div className="p-4 pb-20 border-t border-slate-200 border-dashed">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 flex items-center gap-1"><ShieldAlert size={16} className="text-red-500" /> 내 신고 내역</h3>
-                {reports.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-6 bg-white rounded-xl border border-slate-200">접수된 신고 내역이 없습니다.</p> ) : (
-                  <div className="space-y-2">
-                    {reports.map((rep, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
-                        <div className="flex justify-between items-center mb-1"><span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">{rep.category}</span><span className="text-[10px] font-bold text-slate-500">{rep.status}</span></div>
-                        <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">사유: {rep.reason}</p><p className="text-[9px] text-slate-400 mt-2">{formatDate(rep.reportedAt)} 접수됨</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
@@ -614,7 +594,7 @@ export default function JudgeMapApp() {
           keyboardOffset={keyboardOffset} 
           allJudges={judges} 
           user={user} 
-          onClose={() => window.history.back()}
+          onClose={() => setSelectedJudge(null)}
           showToast={showToast} 
           currentTab={currentTab} 
           selectedRegionName={selectedRegionName} 
