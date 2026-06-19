@@ -91,41 +91,40 @@ export default function JudgeMapApp() {
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 하위 탭 무한 스택 적재 결함 방지를 위해 초기 베이스 스택만 할당
-    if (!window.history.state || !window.history.state.step) {
-      window.history.replaceState({ step: 'exit_trap' }, '');
+    // 1. 앱 실행 직후 바로 뒤로가기 시 튕기는 현상 해결 (루트 2 완벽 대응)
+    // 🚨 기존 replaceState를 pushState로 변경! 
+    // 바닥 기록을 지우지 않고 방어막(exit_trap)을 안전하게 한 겹 씌워야 앱이 바로 안 꺼집니다.
+    if (!window.history.state || window.history.state.step !== 'main') {
+      window.history.pushState({ step: 'exit_trap' }, '');
       window.history.pushState({ step: 'main', tab: currentTabRef.current }, '');
     }
 
     const handlePopState = (e) => {
       const state = e.state;
 
-      // 앱 실행 즉시 뒤로가기 시 튕김 현상(루트 2) 완벽 해결
+      // state가 없거나 exit_trap에 도달한 경우 (모든 팝업이 닫힌 바닥 상태)
       if (!state || state.step === 'exit_trap') {
-        if (currentTabRef.current !== 'map') {
-          setCurrentTab('map');
-          window.history.pushState({ step: 'main' }, '');
+        const now = Date.now();
+        if (now - lastBackPressRef.current < 2000) {
+          // 2초 내에 한 번 더 누르면 앱 찐으로 종료
+          window.history.back(); 
         } else {
-          const now = Date.now();
-          if (now - lastBackPressRef.current < 2000) {
-            window.history.back(); 
-          } else {
-            lastBackPressRef.current = now;
-            showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-            window.history.pushState({ step: 'main', tab: currentTabRef.current }, ''); 
-            
-            setSelectedRegionName(null);
-            setSelectedJudge(null);
-          }
+          // 처음 누른 거면 종료 안내 메시지 띄우고 다시 방어막(main 스택) 리필
+          lastBackPressRef.current = now;
+          showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
+          window.history.pushState({ step: 'main', tab: currentTabRef.current }, ''); 
+          
+          setSelectedRegionName(null);
+          setSelectedJudge(null);
         }
       } 
-      // 뒤로가기를 눌러 '메인' 스택으로 빠져나온 경우
+      // 뒤로가기를 눌러 '메인' 스택으로 빠져나온 경우 (팝업에서 메인 복귀)
       else if (state.step === 'main') {
         setCurrentTab('map');
         setSelectedRegionName(null);
         setSelectedJudge(null);
       } 
-      // 뒤로가기를 눌러 '지역 리스트' 스택으로 빠져나온 경우
+      // 뒤로가기를 눌러 '지역 리스트' 스택으로 빠져나온 경우 (상세에서 리스트 복귀)
       else if (state.step === 'region') {
         setCurrentTab('map');
         setSelectedRegionName(state.region);
@@ -141,7 +140,7 @@ export default function JudgeMapApp() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []); 
+  }, []);
 
   // 탭 전환 시 히스토리 스택 추가하여 뒤로가기 흐름 유지 (루트 3 꼬임 해결 소스 그대로)
   const handleTabChange = (tabName) => {
@@ -379,7 +378,7 @@ export default function JudgeMapApp() {
       <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.22</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
+          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.23</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
         </div>
         <div>
           {user ? (
