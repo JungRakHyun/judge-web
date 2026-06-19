@@ -1,663 +1,525 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
 import { 
-  Scale, LogIn, Map as MapIcon, Search, PlusCircle, UserCircle, Star, ChevronRight, 
-  ShieldAlert, Settings, Edit, Trash2, CheckCircle2, AlertCircle, MapPin, X, Heart 
+  ChevronLeft, Share2, X, Bot, Star, ThumbsUp, Flag, MessageSquare, Heart, 
+  Trash2, Edit2, CornerDownRight, Send 
 } from 'lucide-react';
-import { db, auth, googleProvider } from './firebase'; 
-import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
-import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
+import { db } from '../firebase';
+import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { formatDate, getUserBadge } from '../utils';
+import ReportModal from './ReportModal';
 
-import { regionMapping, getAvgRating, formatDate, getUserBadge } from './utils';
-import JudgeDetailModal from './components/JudgeDetailModal';
-import AdminEditModal from './components/AdminEditModal';
+export default function JudgeDetailModal({ judge, allJudges, user, onClose, showToast, currentTab, selectedRegionName }) {
+  const chartRef = useRef(null);
+  const [reviewText, setReviewText] = useState("");
+  const [rating, setRating] = useState(5);
+  const [isKeyboardActive, setIsKeyboardActive] = useState(false);
+  const [reportModalReview, setReportModalReview] = useState(null);
 
-// 데이터 로딩 컨텐츠 플레이스홀더
-const JudgeSkeletonCard = () => (
-  <div className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center shadow-sm animate-pulse">
-    <div className="space-y-3">
-      <div className="h-3 bg-slate-200 rounded w-24"></div>
-      <div className="h-5 bg-slate-200 rounded w-32"></div>
-    </div>
-    <div className="flex items-center gap-3">
-      <div className="space-y-2 text-right">
-        <div className="h-4 bg-slate-200 rounded w-10 ml-auto"></div>
-        <div className="h-3 bg-slate-200 rounded w-14 ml-auto"></div>
-      </div>
-      <div className="w-8 h-8 bg-slate-100 rounded-full"></div>
-    </div>
-  </div> 
-);
+  // 리뷰/답글 수정 및 작성용 상태 관리
+  // 💡 수정 시 텍스트뿐만 아니라 별점(rating)도 함께 상태로 관리하도록 개선
+  const [editingReview, setEditingReview] = useState(null); 
+  const [replyingTo, setReplyingTo] = useState(null); 
+  const [replyText, setReplyText] = useState("");
+  const [editingReply, setEditingReply] = useState(null); 
 
-export default function JudgeMapApp() {
-  const mapRef = useRef(null);
-  
-  // 지도 줌 레벨 관리를 위한 Ref 추가
-  const mapChartRef = useRef(null);
-  const mapZoomRef = useRef(1.45);
-  
-  // 백그라운드 프로세스 자원 회수 시 상태 보존을 위한 세션 스토리지 바인딩
-  const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('splashShown'));
-  const [currentTab, setCurrentTab] = useState(() => sessionStorage.getItem('currentTab') || 'map'); 
-  
-  // 이벤트 리스너 컨텍스트 안에서 최신 탭 상태 관리를 위한 Ref
-  const currentTabRef = useRef(currentTab);
-  useEffect(() => { currentTabRef.current = currentTab; }, [currentTab]);
-  
-  // 인증 및 인스턴스 데이터 스토어
-  const [user, setUser] = useState(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true); 
-  const [judges, setJudges] = useState([]); 
-  const [reports, setReports] = useState([]); 
-  const [isLoadingData, setIsLoadingData] = useState(true);
-  
-  // 팝업 레이어 제어용 상호 배제 상태값
-  const [selectedRegionName, setSelectedRegionName] = useState(null); 
-  const selectedRegionRef = useRef(selectedRegionName);
-  useEffect(() => { selectedRegionRef.current = selectedRegionName; }, [selectedRegionName]);
+  // 사용자가 현재 메인 리뷰 작성이 아닌 다른 입력창(답글 작성, 수정 등)을 켰는지 여부 감지
+  const isUserActiveOnOtherInput = replyingTo !== null || editingReview !== null || editingReply !== null;
 
-  const [selectedJudge, setSelectedJudge] = useState(null); 
-  const selectedJudgeRef = useRef(selectedJudge);
-  useEffect(() => { selectedJudgeRef.current = selectedJudge; }, [selectedJudge]);
-  
-  // 검색 및 필터 가공용 훅 상태
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortOption, setSortOption] = useState("latest"); 
-  const [mapStatus, setMapStatus] = useState("loading");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
-  const [editModalJudge, setEditModalJudge] = useState(null);
+  const chartData = [
+    { name: '원고 승소', value: judge?.win_rate || 33, itemStyle: { color: '#3B82F6' } },
+    { name: '피고 승소', value: judge?.lose_rate || 33, itemStyle: { color: '#EF4444' } },
+    { name: '조정/화해', value: judge?.draw_rate || 34, itemStyle: { color: '#10B981' } }
+  ];
 
-  // 스크롤 가상화 및 페이징 핸들러
-  const [displayCount, setDisplayCount] = useState(10);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const observer = useRef();
-
-  const [newJudge, setNewJudge] = useState({
-    name: '', title: '판사', region: '서울', court: '', department: '', career: '', ai_summary: '',
-    win_rate: 45, lose_rate: 35, draw_rate: 20
-  });
-
-  const showToast = (message, type = 'success') => {
-    setToast({ show: true, message, type });
-    setTimeout(() => setToast({ show: false, message: '', type: 'success' }), 2500);
-  };
-
-  const isAdmin = user?.email === 'jlh9809@gmail.com';
-
-  // =====================================================================
-  // 기기 물리 뒤로가기 및 브라우저 history 내비게이션 제어
-  // =====================================================================
-  const lastBackPressRef = useRef(0);
+  const bookmarkedUsers = judge?.bookmarkedUsers || [];
+  const isBookmarked = bookmarkedUsers.includes(user?.uid);
 
   useEffect(() => {
-    if (!window.history.state || window.history.state.step !== 'main') {
-      window.history.pushState({ step: 'exit_trap' }, '');
-      window.history.pushState({ step: 'main', tab: currentTabRef.current }, '');
-    }
-
-    const handlePopState = (e) => {
-      const state = e.state;
-
-      if (!state || state.step === 'exit_trap') {
-        const now = Date.now();
-        if (now - lastBackPressRef.current < 2000) {
-          window.history.back(); 
-        } else {
-          lastBackPressRef.current = now;
-          showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
-          window.history.pushState({ step: 'main', tab: currentTabRef.current }, ''); 
-          
-          setSelectedRegionName(null);
-          setSelectedJudge(null);
-        }
-      } 
-      else if (state.step === 'main') {
-        setCurrentTab('map');
-        setSelectedRegionName(null);
-        setSelectedJudge(null);
-      } 
-      else if (state.step === 'region') {
-        setCurrentTab('map');
-        setSelectedRegionName(state.region);
-        setSelectedJudge(null);
-      } 
-      else if (state.step === 'tab') {
-        setCurrentTab(state.tab);
-        setSelectedRegionName(null);
-        setSelectedJudge(null);
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  const handleTabChange = (tabName) => {
-    if (currentTab === tabName) return;
-    
-    if (currentTabRef.current === 'map') {
-      window.history.pushState({ step: 'tab', tab: tabName }, '');
-    } else {
-      window.history.replaceState({ step: 'tab', tab: tabName }, '');
-    }
-    
-    setCurrentTab(tabName);
-    setSelectedRegionName(null);
-    setSelectedJudge(null);
-  };
-  // =====================================================================
-
-  useEffect(() => { 
-    if (showSplash) {
-      setTimeout(() => {
-        setShowSplash(false);
-        sessionStorage.setItem('splashShown', 'true');
-      }, 1500); 
-    }
-  }, [showSplash]);
-
-  useEffect(() => {
-    sessionStorage.setItem('currentTab', currentTab);
-  }, [currentTab]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        const diff = window.innerHeight - window.visualViewport.height;
-        setKeyboardOffset(diff > 50 ? diff * 0.8 : 0);
-      }
-    };
-    window.visualViewport?.addEventListener('resize', handleResize);
-    return () => window.visualViewport?.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setIsAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    setDisplayCount(10);
-  }, [searchQuery, sortOption, currentTab, selectedRegionName]);
-
-  useEffect(() => {
-    if (judges.length > 0) {
-      const urlParams = new URLSearchParams(window.location.search);
-      const targetJudgeId = urlParams.get('judgeId');
-      
-      if (targetJudgeId && !selectedJudge) {
-        const targetJudge = judges.find(j => j.id === targetJudgeId);
-        if (targetJudge) {
-          window.history.pushState({ step: 'judge', judgeId: targetJudge.id }, ''); 
-          setSelectedJudge(targetJudge); 
-          window.history.replaceState({ step: 'judge' }, document.title, window.location.pathname);
-        }
-      }
-    }
-  }, [judges]);
-  
-  const lastElementRef = useCallback(node => {
-    if (isLoadingData) return;
-    if (observer.current) observer.current.disconnect();
-    
-    observer.current = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) setDisplayCount(prev => prev + 10);
-    });
-    
-    if (node) observer.current.observe(node);
-  }, [isLoadingData]);
-
-  useEffect(() => {
-    if (isAuthLoading) return;
-
-    const unsubJudges = onSnapshot(collection(db, "judges"), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setJudges(data);
-      setIsLoadingData(false); 
-      
-      if (selectedJudge) {
-        const updated = data.find(j => j.id === selectedJudge.id);
-        if (updated) setSelectedJudge(updated);
-      }
-    });
-    
-    let unsubReports = () => {};
-    if (user) {
-      unsubReports = onSnapshot(query(collection(db, "reports"), where("userId", "==", user.uid)), (snapshot) => {
-        setReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    let myChart = null;
+    if (chartRef.current) {
+      myChart = echarts.init(chartRef.current);
+      myChart.setOption({
+        tooltip: { trigger: 'item', backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: '#e2e8f0', textStyle: { fontSize: 11, fontWeight: 'bold' } },
+        series: [
+          {
+            type: 'pie', radius: ['45%', '70%'], avoidLabelOverlap: true,
+            itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
+            label: { show: true, formatter: '{d}%', fontWeight: 'bold', fontSize: 12, color: '#475569' },
+            labelLine: { show: true, length: 5, length2: 5 },
+            data: chartData
+          }
+        ]
       });
     }
-    return () => { unsubJudges(); unsubReports(); };
-  }, [selectedJudge?.id, user?.uid, isAuthLoading]);
-
-  useEffect(() => {
-    if (currentTab !== 'map' || showSplash) return;
-    
-    let myChart = null;
-    const initMap = async () => {
-      try {
-        const response = await fetch('https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2013/json/skorea_provinces_geo_simple.json');
-        const geoJson = await response.json();
-        setMapStatus("success");
-
-        setTimeout(() => {
-          if (mapRef.current) {
-            myChart = echarts.init(mapRef.current);
-            mapChartRef.current = myChart; 
-            echarts.registerMap('korea', geoJson);
-            myChart.setOption({
-              tooltip: { show: false },
-              series: [{
-                type: 'map', map: 'korea', 
-                roam: 'move', 
-                zoom: mapZoomRef.current, 
-                center: [127.7, 36.3], selectedMode: 'single',
-                label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#94a3b8', formatter: (params) => regionMapping[params.name] || params.name },
-                itemStyle: { areaColor: '#1e293b', borderColor: '#334155', borderWidth: 1.5 },
-                emphasis: { label: { color: '#ffffff' }, itemStyle: { areaColor: '#3b82f6' } },
-                select: { label: { color: '#ffffff', fontWeight: 'bold' }, itemStyle: { areaColor: '#2563eb' } }
-              }]
-            });
-            myChart.on('click', function (params) {
-              if (params.event && params.event.stop) {
-                params.event.stop(); 
-              }
-              const region = regionMapping[params.name] || params.name;
-              window.history.pushState({ step: 'region', region }, '');
-              setSelectedRegionName(region);
-              setSelectedJudge(null);
-            });
-          }
-        }, 100);
-      } catch (error) { setMapStatus("error"); }
-    };
-    initMap();
     const handleResize = () => { if (myChart) myChart.resize(); };
     window.addEventListener('resize', handleResize);
     return () => { window.removeEventListener('resize', handleResize); if (myChart) myChart.dispose(); };
-  }, [currentTab, showSplash]);
+  }, [judge]);
 
-  const handleLogin = () => {
-    signInWithPopup(auth, googleProvider)
-      .then((result) => {
-        setUser(result.user);
-        showToast("로그인 성공!");
-      })
-      .catch((error) => {
-        if (error.code === 'auth/popup-blocked') {
-          alert("⚠️ 팝업이 차단되었습니다! 카카오톡 등 앱 내부 브라우저가 아닌 일반 '크롬'이나 '사파리' 앱을 직접 켜서 접속해주세요.");
-        } else if (error.code !== 'auth/popup-closed-by-user') {
-          alert("로그인 실패: " + error.message);
-        }
-      });
-  };
-
-  const handleLogout = async () => {
-    if (window.confirm("로그아웃하시겠습니까?")) {
-      await signOut(auth); showToast("로그아웃 되었습니다."); handleTabChange('map');
-    }
-  };
-
-  const handleRegisterJudge = async () => {
-    if (!user) return showToast("데이터를 등록하려면 먼저 로그인해주세요.", "error");
-    if (!newJudge.name || !newJudge.court) return showToast("이름과 소속 법원은 필수입니다.", "error");
-    setIsSubmitting(true);
+  const toggleBookmark = async () => {
+    if (!user) return showToast("즐겨찾기를 하려면 먼저 로그인해주세요.", "error");
     try {
-      await addDoc(collection(db, "judges"), {
-        ...newJudge, win_rate: Number(newJudge.win_rate), lose_rate: Number(newJudge.lose_rate), draw_rate: Number(newJudge.draw_rate),
-        reviews: [], authorId: user.uid
-      });
-      showToast(`${newJudge.name} 판사 데이터가 등록되었습니다!`);
-      setNewJudge({ name: '', title: '판사', region: '서울', court: '', department: '', career: '', ai_summary: '', win_rate: 45, lose_rate: 35, draw_rate: 20 });
-      handleTabChange('map');
-    } catch (error) { showToast(`등록 실패`, "error"); } finally { setIsSubmitting(false); }
+      const newBookmarks = isBookmarked ? bookmarkedUsers.filter(id => id !== user.uid) : [...bookmarkedUsers, user.uid];
+      await updateDoc(doc(db, "judges", judge.id), { bookmarkedUsers: newBookmarks });
+      showToast(isBookmarked ? "즐겨찾기에서 해제되었습니다." : "즐겨찾기에 추가되었습니다!");
+    } catch (e) { showToast("즐겨찾기 처리 실패", "error"); }
   };
 
-  const handleDeleteJudge = async (judgeId, judgeName) => {
-    if (window.confirm(`정말 ${judgeName} 판사 데이터를 영구 삭제하시겠습니까?`)) {
-      try { await deleteDoc(doc(db, "judges", judgeId)); showToast("데이터가 삭제되었습니다."); } 
-      catch (error) { showToast("삭제 중 오류가 발생했습니다.", "error"); }
+  const handleShare = async () => {
+    const shareUrl = `${window.location.origin}${window.location.pathname}?judgeId=${judge.id}`;
+    const shareData = { title: `${judge.name} 판사 정보 - JUDGE MAP`, text: `${judge.court} 소속 ${judge.name} 판사의 판결 성향과 리뷰를 확인해보세요!`, url: shareUrl };
+    if (navigator.share) { 
+      try { await navigator.share(shareData); } catch (e) {} 
+    } else { 
+      navigator.clipboard.writeText(`${shareData.text}\n${shareData.url}`); 
+      showToast("클립보드에 판사 전용 링크가 복사되었습니다!"); 
     }
   };
 
-  const regionJudges = selectedRegionName ? judges.filter(j => j.region === selectedRegionName) : [];
-  let searchedJudges = judges.filter(j => j.name.includes(searchQuery) || j.court.includes(searchQuery) || j.region.includes(searchQuery));
-  searchedJudges.sort((a, b) => {
-    if (sortOption === 'rating') return parseFloat(getAvgRating(b.reviews)) - parseFloat(getAvgRating(a.reviews));
-    if (sortOption === 'reviews') return (b.reviews?.length || 0) - (a.reviews?.length || 0);
-    return 0; 
-  });
+  const updateAISummaryIfNeeded = async (currentReviews) => {
+    const validReviews = currentReviews.filter(r => r && r.comment);
+    if (validReviews.length >= 1) {
+      const ACTUAL_GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY; 
+      if (!ACTUAL_GEMINI_API_KEY) return;
+      const prompt = `다음은 ${judge.name} 판사에 대한 리뷰입니다. 이 리뷰들의 공통적인 내용과 판사의 재판 성향을 3줄로 객관적으로 요약해주세요:\n\n${validReviews.map(r => r.comment).join("\n")}`;
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${ACTUAL_GEMINI_API_KEY}`, { 
+          method: "POST", headers: { "Content-Type": "application/json" }, 
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) 
+        });
+        const data = await res.json();
+        if (res.ok && data.candidates?.length > 0) {
+          await updateDoc(doc(db, "judges", judge.id), { ai_summary: data.candidates[0].content.parts[0].text });
+        }
+      } catch (error) { console.error("AI 요약 실패", error); }
+    } else {
+      await updateDoc(doc(db, "judges", judge.id), { ai_summary: "" });
+    }
+  };
 
-  const myReviews = [];
-  judges.forEach(j => { j.reviews?.forEach(r => { if (r.uid === user?.uid) myReviews.push({ judgeId: j.id, judgeName: j.name, court: j.court, ...r }); }); });
-  myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const myBadge = getUserBadge(myReviews.length);
+  const submitReview = async () => {
+    if (!user) return showToast("리뷰를 작성하려면 먼저 로그인해주세요.", "error");
+    if (!reviewText.trim()) return showToast("리뷰 내용을 입력해주세요.", "error");
+    try {
+      const updatedReviews = [...(judge.reviews || []), { rating, comment: reviewText, timestamp: new Date().toISOString(), userName: user.displayName || "익명", uid: user.uid, likes: 0, likedUsers: [], replies: [] }];
+      await updateDoc(doc(db, "judges", judge.id), { reviews: arrayUnion(updatedReviews[updatedReviews.length-1]) });
+      setReviewText(""); setRating(5); setIsKeyboardActive(false); showToast("소중한 리뷰가 등록되었습니다.");
+      await updateAISummaryIfNeeded(updatedReviews);
+    } catch (e) { showToast("리뷰 등록 실패", "error"); }
+  };
 
-  // 💡 관심 판사 데이터 추출 로직
-  const bookmarkedJudges = user ? judges.filter(j => j?.bookmarkedUsers?.includes(user.uid)) : [];
+  // 💡 리뷰 수정 시 별점과 내용을 함께 업데이트
+  const submitEditReview = async (rev) => {
+    if (!editingReview?.text?.trim()) return showToast("내용을 입력해주세요.", "error");
+    try {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
+        if (r.uid === rev.uid && r.timestamp === rev.timestamp) {
+          return { ...r, comment: editingReview.text, rating: editingReview.rating, isEdited: true };
+        }
+        return r;
+      });
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+      setEditingReview(null); setIsKeyboardActive(false);
+      showToast("리뷰가 수정되었습니다.");
+      await updateAISummaryIfNeeded(updatedReviews);
+    } catch (e) { showToast("리뷰 수정 실패", "error"); }
+  };
 
-  if (showSplash || isAuthLoading) {
+  const handleDeleteReview = async (rev) => {
+    if (!window.confirm("정말 이 리뷰를 삭제하시겠습니까?")) return;
+    try {
+      const updatedReviews = (judge.reviews || []).filter(r => r && (r.timestamp !== rev.timestamp || r.uid !== rev.uid));
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+      showToast("리뷰가 삭제되었습니다.");
+      await updateAISummaryIfNeeded(updatedReviews);
+    } catch (e) { showToast("리뷰 삭제 실패", "error"); }
+  };
+
+  const handleLikeReview = async (rev) => {
+    if (!user) return showToast("로그인이 필요합니다.", "error");
+    const likedUsers = rev.likedUsers || [];
+    const isReviewLiked = likedUsers.includes(user.uid);
+    try {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
+        if (r.uid === rev.uid && r.timestamp === rev.timestamp) {
+          if (isReviewLiked) return { ...r, likes: Math.max(0, (r.likes || 1) - 1), likedUsers: likedUsers.filter(id => id !== user.uid) };
+          else return { ...r, likes: (r.likes || 0) + 1, likedUsers: [...likedUsers, user.uid] };
+        }
+        return r;
+      });
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+    } catch (e) { showToast("오류가 발생했습니다.", "error"); }
+  };
+
+  const submitReply = async (targetRev) => {
+    if (!replyText.trim()) return showToast("답글 내용을 입력해주세요.", "error");
+    try {
+      const newReply = { uid: user.uid, userName: user.displayName || "익명", text: replyText, timestamp: new Date().toISOString() };
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
+        if (r.timestamp === targetRev.timestamp && r.uid === targetRev.uid) {
+          return { ...r, replies: [...(r.replies || []), newReply] };
+        }
+        return r;
+      });
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+      setReplyingTo(null); setReplyText(""); setIsKeyboardActive(false);
+      showToast("답글이 등록되었습니다.");
+    } catch (e) { showToast("답글 등록 실패", "error"); }
+  };
+
+  const handleDeleteReply = async (rev, replyToDel) => {
+    if (!window.confirm("정말 이 답글을 삭제하시겠습니까?")) return;
+    try {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
+        if (r.timestamp === rev.timestamp && r.uid === rev.uid) {
+          return { ...r, replies: (r.replies || []).filter(reply => reply && reply.timestamp !== replyToDel.timestamp) };
+        }
+        return r;
+      });
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+      showToast("답글이 삭제되었습니다.");
+    } catch (e) { showToast("답글 삭제 실패", "error"); }
+  };
+
+  const submitEditReply = async (rev, replyToEdit) => {
+    if (!editingReply?.text?.trim()) return showToast("내용을 입력해주세요.", "error");
+    try {
+      const updatedReviews = (judge.reviews || []).map(r => {
+        if (!r) return r;
+        if (r.timestamp === rev.timestamp && r.uid === rev.uid) {
+          const updatedReplies = (r.replies || []).map(reply => {
+            if (!reply) return reply;
+            if (reply.timestamp === replyToEdit.timestamp) return { ...reply, text: editingReply.text, isEdited: true };
+            return reply;
+          });
+          return { ...r, replies: updatedReplies };
+        }
+        return r;
+      });
+      await updateDoc(doc(db, "judges", judge.id), { reviews: updatedReviews });
+      setEditingReply(null); setIsKeyboardActive(false);
+      showToast("답글이 수정되었습니다.");
+    } catch (e) { showToast("답글 수정 실패", "error"); }
+  };
+
+  // 모든 서브 입력 액션 일괄 취소 처리 함수
+  const handleCancelSubInputs = () => {
+    setReplyingTo(null);
+    setEditingReview(null);
+    setEditingReply(null);
+    setReplyText("");
+    setIsKeyboardActive(false);
+  };
+
+  // 💡 리스트 렌더링용 Read-Only 별점 생성 컴포넌트 (0.5 단위 지원)
+  const renderReadOnlyStars = (ratingValue, size = 10) => {
     return (
-      <div className="w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center justify-center select-none animate-fade-in">
-        <Scale className="text-blue-500 mb-5 animate-pulse" size={64} />
-        <h1 className="text-white font-extrabold text-3xl tracking-tight leading-tight mb-2">JUDGE MAP</h1>
-        <p className="text-slate-400 text-xs font-bold tracking-widest">법관 통합 정보 생태계</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative w-full h-[100dvh] bg-[#0B1120] flex flex-col items-center overflow-hidden select-none pb-[60px]">
-      
-      <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[9999] transition-all duration-300 pointer-events-none ${toast.show ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
-        <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl shadow-xl border ${toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-800 border-slate-700 text-white'}`}>
-          {toast.type === 'error' ? <AlertCircle size={18} /> : <CheckCircle2 size={18} className="text-emerald-400" />}
-          <span className="text-xs font-bold whitespace-nowrap">{toast.message}</span>
-        </div>
-      </div>
-
-      <header className="w-full max-w-md bg-[#0F172A] border-b border-slate-800 p-4 flex justify-between items-center z-10 shadow-lg shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600/20 p-2 rounded-lg"><Scale className="text-blue-500" size={22} /></div>
-          <div><h1 className="text-white font-extrabold text-lg tracking-tight leading-tight">JUDGE MAP V1.24</h1><p className="text-slate-400 text-[10px] mt-0.5">법관 통합 정보 생태계</p></div>
-        </div>
-        <div>
-          {user ? (
-            <button onClick={handleLogout} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-full text-xs font-bold transition border border-slate-700 shadow-sm"><img src={user.photoURL} alt="profile" className="w-5 h-5 rounded-full" /> 로그아웃</button>
-          ) : (
-            <button onClick={handleLogin} className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-full text-xs font-bold transition shadow-md"><LogIn size={14} /> 로그인</button>
-          )}
-        </div>
-      </header>
-
-      {/* ==================== 1. 지도 탭 ==================== */}
-      {currentTab === 'map' && (
-        <div className="w-full max-w-md flex-1 flex flex-col relative px-2">
-          {/* 수동 지도 줌 컨트롤 버튼 */}
-          <div className="absolute right-4 top-6 flex flex-col gap-2 z-20">
-            <button onClick={() => {
-              if(mapChartRef.current) {
-                mapZoomRef.current = Math.min(mapZoomRef.current * 1.4, 5.0);
-                mapChartRef.current.setOption({ series: [{ zoom: mapZoomRef.current }] });
-              }
-            }} className="w-10 h-10 bg-white/90 rounded-full shadow-md flex items-center justify-center font-extrabold text-xl text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">＋</button>
-            <button onClick={() => {
-              if(mapChartRef.current) {
-                mapZoomRef.current = Math.max(mapZoomRef.current / 1.4, 1.0);
-                mapChartRef.current.setOption({ series: [{ zoom: mapZoomRef.current }] });
-              }
-            }} className="w-10 h-10 bg-white/90 rounded-full shadow-md flex items-center justify-center font-extrabold text-xl text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors">－</button>
-          </div>
-
-          <div className="relative w-full flex-1 flex items-center justify-center min-h-[400px]">
-            {mapStatus === "loading" && <p className="text-blue-400 text-sm font-bold animate-pulse absolute z-0">지도를 불러오는 중...</p>}
-            <div ref={mapRef} style={{ width: '100%', height: '100%', pointerEvents: selectedRegionName ? 'none' : 'auto' }} className={`w-full z-0 transition-opacity duration-500 ${mapStatus === 'success' ? 'opacity-100' : 'opacity-0'}`}></div>
-          </div>
-          <div className="absolute top-6 left-1/2 transform -translate-x-1/2 bg-slate-800/80 backdrop-blur border border-slate-700 text-slate-300 px-4 py-1.5 rounded-full text-[11px] font-bold pointer-events-none shadow-lg whitespace-nowrap">지역을 터치하여 검색하세요</div>
-
-          {selectedRegionName && !selectedJudge && (
-            <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
-              <div style={{ transform: `translateY(-${keyboardOffset}px)` }} className="w-full max-w-md bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col h-[80dvh] transition-transform duration-300">
-                <div className="p-4 pb-3 border-b border-slate-200 bg-white rounded-t-3xl shrink-0 flex justify-between items-center">
-                  <h2 className="text-base font-bold flex items-center gap-2 text-slate-900 ml-1"><MapPin className="text-blue-600 inline" size={18} /> {selectedRegionName} 관할 법관 ({isLoadingData ? '-' : regionJudges.length})</h2>
-                  <button onClick={() => window.history.back()} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500"><X size={20} /></button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar">
-                  {isLoadingData ? (
-                    <div className="flex flex-col gap-3">
-                      {[1, 2, 3, 4].map(i => <JudgeSkeletonCard key={i} />)}
-                    </div>
-                  ) : regionJudges.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 bg-white rounded-2xl border border-slate-200">
-                      <p className="text-sm font-bold text-slate-500 mb-3">등록된 데이터가 없습니다.</p>
-                      <button onClick={() => { handleTabChange('register'); }} className="text-xs bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700">신규 등록하기</button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {regionJudges.slice(0, displayCount).map(j => (
-                        <div key={j.id} onClick={() => {
-                          window.history.pushState({ step: 'judge', judgeId: j.id }, '');
-                          setSelectedJudge(j);
-                        }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
-                          <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
-                            <div className="text-slate-300 bg-slate-50 p-1.5 rounded-full group-hover:bg-blue-100 group-hover:text-blue-600"><ChevronRight size={18} /></div>
-                          </div>
-                        </div>
-                      ))}
-                      {displayCount < regionJudges.length && (
-                        <div ref={lastElementRef} className="py-4 flex justify-center w-full">
-                          <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ==================== 2. 검색 탭 ==================== */}
-      {currentTab === 'search' && (
-        <div className="w-full max-w-md flex-1 flex flex-col bg-slate-50 h-[100dvh] overflow-hidden">
-          <div className="p-4 bg-white border-b border-slate-200 shadow-sm shrink-0">
-            <div className="relative mb-3">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
-              <input type="text" placeholder="판사 이름, 법원, 지역 검색" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500"/>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setSortOption('latest')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'latest' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>🕒 기본/최신순</button>
-              <button onClick={() => setSortOption('rating')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'rating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>⭐ 별점높은순</button>
-              <button onClick={() => setSortOption('reviews')} className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${sortOption === 'reviews' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>💬 리뷰많은순</button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-y-auto px-4 py-4 custom-scrollbar touch-auto">
-            {isLoadingData ? (
-              <div className="flex flex-col gap-3 pb-6">
-                {[1, 2, 3, 4, 5].map(i => <JudgeSkeletonCard key={i} />)}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3 pb-6">
-                {searchedJudges.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-10">검색 결과가 없습니다.</p> ) : (
-                  <>
-                    {searchedJudges.slice(0, displayCount).map(j => (
-                      <div key={j.id} onClick={() => {
-                        window.history.pushState({ step: 'judge', judgeId: j.id }, '');
-                        setSelectedJudge(j);
-                      }} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center cursor-pointer hover:border-blue-300 hover:bg-blue-50/50 shadow-sm group animate-fade-in">
-                        <div><p className="text-[11px] font-bold text-slate-500 mb-1">{j.region} • {j.court} • {j.department}</p><p className="text-lg font-extrabold text-slate-800 group-hover:text-blue-700">{j.name} <span className="text-sm font-medium text-slate-600">{j.title}</span></p></div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right"><div className="flex items-center justify-end gap-1 text-amber-500 font-bold text-[13px]"><Star size={12} className="fill-amber-500" /> {getAvgRating(j.reviews)}</div><p className="text-[10px] text-slate-400 mt-0.5">리뷰 {j.reviews?.length || 0}건</p></div>
-                          <ChevronRight size={18} className="text-slate-300" />
-                        </div>
-                      </div>
-                    ))}
-                    {displayCount < searchedJudges.length && (
-                      <div ref={lastElementRef} className="py-4 flex justify-center w-full">
-                        <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ==================== 3. 등록 탭 ==================== */}
-      {currentTab === 'register' && (
-        <div className="w-full max-w-md flex-1 overflow-y-auto px-4 py-4 custom-scrollbar bg-slate-50">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 pb-10">
-            <h2 className="text-lg font-bold text-slate-800 mb-5 flex items-center gap-2"><PlusCircle className="text-blue-600" /> 신규 데이터 등록</h2>
-            {!user ? (
-               <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 text-center"><LogIn className="text-slate-400 mb-3" size={28} /><p className="text-[15px] font-bold text-slate-700 mb-2">등록 권한이 없습니다.</p><button onClick={handleLogin} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold mt-2">구글로 로그인</button></div>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">이름</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none focus:ring-2 focus:ring-blue-500" value={newJudge.name} onChange={e=>setNewJudge({...newJudge, name: e.target.value})} placeholder="홍길동" /></div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">직급</label><select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.title} onChange={e=>setNewJudge({...newJudge, title: e.target.value})}><option>판사</option><option>부장판사</option><option>수석부장판사</option><option>법원장</option></select></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">관할 지역</label>
-                    <select className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.region} onChange={e=>setNewJudge({...newJudge, region: e.target.value})}>
-                      {Object.values(regionMapping).filter((v,i,a)=>a.indexOf(v)===i).map(r=><option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">소속 법원</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.court} onChange={e=>setNewJudge({...newJudge, court: e.target.value})} placeholder="서울중앙지법" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">담당 부서</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.department} onChange={e=>setNewJudge({...newJudge, department: e.target.value})} placeholder="형사1부" /></div>
-                  <div><label className="block text-[11px] font-bold text-slate-600 mb-1">경력</label><input type="text" className="w-full p-2.5 bg-slate-50 border rounded-xl text-[13px] outline-none" value={newJudge.career} onChange={e=>setNewJudge({...newJudge, career: e.target.value})} placeholder="연수원 30기" /></div>
-                </div>
-                <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                  <label className="block text-[11px] font-bold text-blue-800 mb-2">판결 성향 (%)</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div><label className="text-[10px] text-slate-500">원고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.win_rate} onChange={e=>setNewJudge({...newJudge, win_rate: e.target.value})} /></div>
-                    <div><label className="text-[10px] text-slate-500">피고 승</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.lose_rate} onChange={e=>setNewJudge({...newJudge, lose_rate: e.target.value})} /></div>
-                    <div><label className="text-[10px] text-slate-500">조정/화해</label><input type="number" className="w-full p-2 border rounded-lg text-xs" value={newJudge.draw_rate} onChange={e=>setNewJudge({...newJudge, draw_rate: e.target.value})} /></div>
-                  </div>
-                </div>
-                <button onClick={handleRegisterJudge} disabled={isSubmitting} className={`w-full text-white text-[13px] font-bold py-3.5 rounded-xl mt-4 transition-colors ${isSubmitting ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'}`}>{isSubmitting ? '처리 중...' : '등록하기'}</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ==================== 4. 마이페이지 탭 ==================== */}
-      {currentTab === 'mypage' && (
-        <div className="w-full max-w-md flex-1 overflow-y-auto bg-slate-50 custom-scrollbar">
-          {!user ? (
-            <div className="h-full flex flex-col items-center justify-center p-8 text-center"><UserCircle className="text-slate-300 mb-4" size={48} /><p className="text-lg font-bold text-slate-700 mb-2">로그인이 필요합니다</p><button onClick={handleLogin} className="bg-blue-600 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md mt-4">구글로 로그인</button></div>
-          ) : (
-            <div>
-              <div className="bg-white p-6 border-b border-slate-200 shadow-sm flex items-center gap-5">
-                <img src={user.photoURL} alt="profile" className="w-16 h-16 rounded-full border border-slate-200 shadow-sm" />
-                <div>
-                  <div className="flex items-center gap-2 mb-1"><h2 className="text-xl font-extrabold text-slate-800">{user.displayName}</h2><span className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 ${myBadge.color}`}>{myBadge.icon} {myBadge.text}</span></div>
-                  <p className="text-[11px] text-slate-500 mb-2">{user.email}</p>
-                  <div className="inline-block bg-slate-50 border border-slate-100 text-slate-600 px-2.5 py-1 rounded-md text-[10px] font-bold">작성한 리뷰 <span className="text-blue-600">{myReviews.length}</span>개</div>
-                </div>
-              </div>
-
-              {isAdmin && (
-                <div className="p-4 bg-indigo-50/50 border-b border-indigo-100">
-                  <h3 className="text-sm font-bold text-indigo-900 mb-3 px-1 flex items-center gap-1"><Settings size={16}/> 관리자: 전체 판사 데이터 ({judges.length})</h3>
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                    {judges.map(j => (
-                      <div key={j.id} className="bg-white border border-indigo-100 p-3 rounded-xl shadow-sm flex justify-between items-center">
-                        <div><p className="text-[11px] font-bold text-slate-500">{j.court}</p><p className="text-[13px] font-extrabold text-slate-800">{j.name} <span className="font-medium text-slate-500">{j.title}</span></p></div>
-                        <div className="flex gap-2">
-                          <button onClick={() => setEditModalJudge(j)} className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-600 px-2 py-1.5 rounded-lg hover:bg-indigo-100"><Edit size={12}/>수정</button>
-                          <button onClick={() => handleDeleteJudge(j.id, j.name)} className="flex items-center gap-1 text-[10px] font-bold bg-red-50 text-red-600 px-2 py-1.5 rounded-lg hover:bg-red-100"><Trash2 size={12}/>삭제</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+      <div className="flex items-center">
+        {[1, 2, 3, 4, 5].map((star) => {
+          const isFull = star <= ratingValue;
+          const isHalf = star - 0.5 === ratingValue;
+          return (
+            <div key={star} className="relative">
+              <Star size={size} className="text-slate-200 fill-slate-50" />
+              {(isFull || isHalf) && (
+                <div className="absolute top-0 left-0 overflow-hidden pointer-events-none" style={{ width: isHalf ? '50%' : '100%' }}>
+                  <Star size={size} className="fill-amber-400 text-amber-400" />
                 </div>
               )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
-              {/* 💡 관심 판사 내역 조회 */}
-              <div className="p-4 pb-0 border-b border-slate-100 border-dashed">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 flex items-center gap-1">
-                  <Heart size={16} className="text-pink-500 fill-pink-500" /> 내 관심 판사
-                </h3>
-                {isLoadingData ? (
-                  <div className="space-y-3 mb-4">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-20"></div>)}</div>
-                ) : bookmarkedJudges.length === 0 ? ( 
-                  <p className="text-center text-xs text-slate-400 py-8 mb-4 bg-white rounded-xl border border-slate-200">등록된 관심 판사가 없습니다.</p> 
-                ) : (
-                  <div className="space-y-3 mb-4">
-                    {bookmarkedJudges.map((j) => (
-                      <div key={j.id} onClick={() => {
-                        window.history.pushState({ step: 'judge', judgeId: j.id }, '');
-                        setSelectedJudge(j);
-                      }} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm cursor-pointer hover:border-pink-300 hover:bg-pink-50/30 transition-colors flex justify-between items-center group">
-                        <div>
-                          <p className="text-[10px] font-bold text-pink-500 mb-0.5">{j.court} • {j.department}</p>
-                          <p className="text-sm font-extrabold text-slate-800 group-hover:text-pink-600">{j.name} <span className="text-[11px] font-medium text-slate-500">{j.title}</span></p>
-                        </div>
-                        <ChevronRight size={16} className="text-slate-300 group-hover:text-pink-400" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/70 backdrop-blur-sm transition-opacity duration-300">
+        <div className={`w-full max-w-md bg-white rounded-t-3xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${isKeyboardActive ? 'h-[100dvh] rounded-none' : 'h-[90dvh]'}`}>
+          
+          <div className="p-4 pb-3 border-b border-slate-100 shrink-0 flex justify-between items-center bg-white rounded-t-3xl">
+            {currentTab === 'map' && selectedRegionName ? (
+              <button onClick={onClose} className="flex items-center gap-1 text-slate-500 hover:text-slate-800 font-bold text-sm bg-slate-50 px-2 py-1.5 rounded-lg transition-colors"><ChevronLeft size={18} /> 목록</button>
+            ) : (<h2 className="text-base font-bold text-slate-900 ml-1">상세 정보</h2>)}
+            <div className="flex items-center gap-2">
+              <button onClick={toggleBookmark} className={`p-1.5 rounded-full transition-colors ${isBookmarked ? 'bg-pink-50 text-pink-500' : 'bg-slate-50 hover:bg-pink-50 hover:text-pink-500 text-slate-500'}`}>
+                <Heart size={18} className={isBookmarked ? 'fill-pink-500' : ''} />
+              </button>
+              <button onClick={handleShare} className="p-1.5 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-full text-slate-500 transition-colors"><Share2 size={18} /></button>
+              <button onClick={onClose} className="p-1.5 bg-slate-50 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"><X size={20} /></button>
+            </div>
+          </div>
 
-              <div className="p-4 pb-4">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 mt-2">내가 작성한 리뷰</h3>
-                {isLoadingData ? (
-                  <div className="space-y-3">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-24"></div>)}</div>
-                ) : myReviews.length === 0 ? ( 
-                  <p className="text-center text-xs text-slate-400 py-10 bg-white rounded-xl border border-slate-200">아직 작성한 리뷰가 없습니다.</p> 
-                ) : (
-                  <div className="space-y-3">
-                    {myReviews.map((rev, idx) => (
-                      <div key={idx} onClick={() => { 
-                        const judge = judges.find(j => j.id === rev.judgeId); 
-                        if(judge) {
-                          window.history.pushState({ step: 'judge', judgeId: judge.id }, '');
-                          setSelectedJudge(judge); 
-                        }
-                      }} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm cursor-pointer hover:border-blue-300">
-                        <div className="flex justify-between items-center mb-2"><p className="text-xs font-bold text-blue-600">{rev.court} • {rev.judgeName}</p><span className="text-[10px] text-slate-400">{formatDate(rev.timestamp)}</span></div>
-                        <div className="flex items-center mb-1.5 gap-1">{[1,2,3,4,5].map(star => (<Star key={star} size={10} className={star <= rev.rating ? "fill-amber-400 text-amber-400" : "text-slate-200"} />))}</div>
-                        <p className="text-[13px] text-slate-700">{rev.comment}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 pb-20 border-t border-slate-200 border-dashed">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 flex items-center gap-1"><ShieldAlert size={16} className="text-red-500" /> 내 신고 내역</h3>
-                {reports.length === 0 ? ( <p className="text-center text-xs text-slate-400 py-6 bg-white rounded-xl border border-slate-200">접수된 신고 내역이 없습니다.</p> ) : (
-                  <div className="space-y-2">
-                    {reports.map((rep, idx) => (
-                      <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
-                        <div className="flex justify-between items-center mb-1"><span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">{rep.category}</span><span className="text-[10px] font-bold text-slate-500">{rep.status}</span></div>
-                        <p className="text-[11px] text-slate-600 mt-2 leading-relaxed">사유: {rep.reason}</p><p className="text-[9px] text-slate-400 mt-2">{formatDate(rep.reportedAt)} 접수됨</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+          <div className="flex-1 overflow-y-auto px-5 custom-scrollbar pb-4 animate-fade-in">
+            <div className="bg-slate-50 p-4 rounded-xl mt-3 mb-4 border border-slate-100 relative overflow-hidden">
+              <div className="relative z-10">
+                <p className="text-[11px] font-semibold text-slate-500 mb-1">{judge?.region} • {judge?.department}</p>
+                <p className="text-xl font-extrabold text-slate-800">{judge?.name} <span className="text-xs font-medium text-slate-600">{judge?.title}</span></p>
+                <p className="text-xs text-slate-600 mt-2">💼 {judge?.career || '경력 정보 없음'}</p>
               </div>
             </div>
-          )}
+
+            {judge?.ai_summary && (
+              <div className="bg-indigo-50/50 border border-indigo-100 p-4 rounded-xl mb-4">
+                <p className="text-[12px] font-bold text-indigo-800 flex items-center gap-1 mb-2"><Bot size={14}/> 리뷰 기반 AI 요약</p>
+                <p className="text-[13px] text-indigo-900 leading-relaxed whitespace-pre-wrap">{judge.ai_summary}</p>
+              </div>
+            )}
+
+            <h3 className="text-[13px] font-bold text-slate-700 mb-2 px-1 mt-6">판결 성향 통계</h3>
+            <div className="h-40 w-full mb-1 relative flex items-center justify-center">
+              <div ref={chartRef} style={{ width: '100%', height: '100%' }}></div>
+              <div className="absolute flex flex-col items-center justify-center pointer-events-none">
+                 <span className="text-[10px] text-slate-400 font-bold">총 건수</span>
+                 <span className="text-sm font-extrabold text-slate-700">100%</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 text-center text-[10px] font-bold mb-6 gap-2 border-b border-slate-100 pb-4 mt-2">
+              <div className="bg-blue-50 text-blue-700 p-2 rounded-xl">원고 승소<br/><span className="text-sm">{judge?.win_rate || 0}%</span></div>
+              <div className="bg-red-50 text-red-700 p-2 rounded-xl">피고 승소<br/><span className="text-sm">{judge?.lose_rate || 0}%</span></div>
+              <div className="bg-emerald-50 text-emerald-700 p-2 rounded-xl">조정/화해<br/><span className="text-sm">{judge?.draw_rate || 0}%</span></div>
+            </div>
+
+            <div className="mb-2">
+              <h3 className="text-[13px] font-bold text-slate-700 mb-3 px-1 flex justify-between items-center">
+                시민 평가 내역 <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{(judge.reviews || []).filter(Boolean).length}건</span>
+              </h3>
+              {(!judge.reviews || judge.reviews.length === 0) ? (
+                <p className="text-center text-xs text-slate-400 py-4 bg-slate-50 rounded-xl border border-slate-100">등록된 리뷰가 없습니다.</p>
+              ) : (
+                <div className="space-y-4">
+                  {[...judge.reviews].filter(Boolean).reverse().map((rev, idx) => {
+                    const authorBadge = getUserBadge(allJudges.reduce((acc, j) => acc + (j.reviews?.filter(r => r?.uid === rev.uid).length || 0), 0)) || { icon: '', text: '시민', color: 'bg-slate-100 text-slate-500' };
+                    const isReviewLiked = rev.likedUsers?.includes(user?.uid);
+                    const isMyReview = user?.uid === rev.uid;
+                    const isEditing = editingReview?.timestamp === rev.timestamp;
+                    const isReplying = replyingTo === rev.timestamp;
+
+                    return (
+                      <div key={idx} className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
+                        <div className="flex justify-between items-center mb-1.5">
+                          <div className="flex items-center gap-2">
+                            {/* 💡 기존 1점 단위 하드코딩에서 0.5 단위 렌더링으로 교체 */}
+                            {renderReadOnlyStars(rev.rating || 5, 10)}
+                            <span className="text-[10px] font-bold text-slate-700">{rev.userName?.split(' ')[0] || "익명"}</span>
+                            <span className={`text-[8px] px-1.5 py-0.5 rounded-sm ${authorBadge.color}`}>{authorBadge.icon} {authorBadge.text}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 font-medium">{formatDate(rev.timestamp)} {rev.isEdited && '(수정됨)'}</span>
+                            {isMyReview && !isEditing && (
+                              <div className="flex items-center gap-1.5">
+                                {/* 💡 수정 시작 시 기존의 텍스트와 '별점'을 함께 불러옴 */}
+                                <button onClick={() => setEditingReview({ timestamp: rev.timestamp, text: rev.comment || '', rating: rev.rating || 5 })} className="text-slate-400 hover:text-blue-500"><Edit2 size={12} /></button>
+                                <button onClick={() => handleDeleteReview(rev)} className="text-slate-400 hover:text-red-500"><Trash2 size={12} /></button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {isEditing ? (
+                          <div className="mt-2 mb-2 relative bg-blue-50/30 p-2 rounded-lg border border-blue-200">
+                            {/* 💡 수정 모드 전용 대화형 0.5 별점 UI */}
+                            <div className="flex items-center gap-1 mb-2 pl-1">
+                              <span className="text-[10px] font-bold text-slate-500 mr-1">별점 수정:</span>
+                              <div className="flex items-center">
+                                {[1, 2, 3, 4, 5].map((star) => {
+                                  const isFull = star <= editingReview.rating;
+                                  const isHalf = star - 0.5 === editingReview.rating;
+                                  return (
+                                    <div 
+                                      key={star} 
+                                      className="p-1 cursor-pointer transition-transform hover:scale-110 active:scale-95"
+                                      onClick={(e) => {
+                                        const rect = e.currentTarget.getBoundingClientRect();
+                                        const isHalfClick = e.clientX - rect.left < rect.width / 2;
+                                        setEditingReview({ ...editingReview, rating: isHalfClick ? star - 0.5 : star });
+                                      }}
+                                    >
+                                      <div className="relative">
+                                        <Star size={14} className="text-slate-200 fill-slate-50" />
+                                        {(isFull || isHalf) && (
+                                          <div className="absolute top-0 left-0 overflow-hidden pointer-events-none" style={{ width: isHalf ? '50%' : '100%' }}>
+                                            <Star size={14} className="fill-amber-400 text-amber-400" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <span className="text-[10px] font-bold text-amber-500 ml-1">{editingReview.rating}</span>
+                            </div>
+                            <textarea 
+                              className="w-full p-2 border border-slate-200 rounded-lg text-[12px] bg-white outline-none resize-none focus:ring-1 focus:ring-blue-400" 
+                              rows="2" value={editingReview?.text || ''} 
+                              onChange={(e) => setEditingReview({ ...editingReview, text: e.target.value })}
+                              onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
+                            />
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingReview(null)} className="text-[10px] text-slate-500 px-2 py-1 bg-white border border-slate-200 rounded-md font-bold">취소</button>
+                              <button onClick={() => submitEditReview(rev)} className="text-[10px] text-white px-2 py-1 bg-blue-600 rounded-md font-bold">수정 완료</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[13px] text-slate-700 mb-3 leading-snug">{rev.comment}</p>
+                        )}
+                        
+                        <div className="flex gap-3 justify-end border-t border-slate-50 pt-2 mt-1">
+                          <button onClick={() => handleLikeReview(rev)} className={`flex items-center gap-1 text-[10px] font-bold transition-colors ${isReviewLiked ? 'text-blue-600' : 'text-slate-400 hover:text-blue-500'}`}>
+                            <ThumbsUp size={12} className={isReviewLiked ? 'fill-blue-600' : ''} /> 공감 {rev.likes > 0 ? rev.likes : ''}
+                          </button>
+                          <button onClick={() => { if(!user) return showToast("로그인이 필요합니다.", "error"); setReplyingTo(isReplying ? null : rev.timestamp); }} className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-indigo-500 transition-colors">
+                            <MessageSquare size={12} /> 답글
+                          </button>
+                          {!isMyReview && (
+                            <button onClick={() => { if(!user) return showToast("로그인이 필요합니다.", "error"); setReportModalReview(rev); }} className="flex items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-red-500 transition-colors">
+                              <Flag size={12} /> 신고
+                            </button>
+                          )}
+                        </div>
+
+                        {isReplying && (
+                          <div className="mt-3 pl-2 border-l-2 border-indigo-200 relative flex items-start gap-2">
+                            <CornerDownRight size={14} className="text-indigo-300 mt-1.5 shrink-0" />
+                            <textarea 
+                              className="flex-1 p-2 border border-slate-200 rounded-lg text-[11px] bg-slate-50 outline-none resize-none"
+                              rows="1" placeholder="답글을 남겨주세요." value={replyText} 
+                              onChange={(e) => setReplyText(e.target.value)}
+                              onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
+                            />
+                            <button onClick={() => submitReply(rev)} className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shrink-0"><Send size={12}/></button>
+                          </div>
+                        )}
+
+                        {rev.replies && rev.replies.length > 0 && (
+                          <div className="mt-3 pl-2 border-l-2 border-slate-200 space-y-2">
+                            {rev.replies.filter(Boolean).map((reply, rIdx) => {
+                              const isMyReply = user?.uid === reply?.uid;
+                              const isEditingReply = editingReply?.reviewTimestamp === rev.timestamp && editingReply?.replyTimestamp === reply?.timestamp;
+
+                              return (
+                                <div key={rIdx} className="bg-slate-50 p-2 rounded-lg ml-2 relative">
+                                  <div className="flex justify-between items-center mb-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-bold text-slate-700">{reply?.userName || "익명"}</span>
+                                      <span className="text-[8px] text-slate-400">{formatDate(reply?.timestamp)} {reply?.isEdited && '(수정됨)'}</span>
+                                    </div>
+                                    {isMyReply && !isEditingReply && (
+                                      <div className="flex items-center gap-1.5">
+                                        <button onClick={() => setEditingReply({ reviewTimestamp: rev.timestamp, replyTimestamp: reply.timestamp, text: reply.text })} className="text-slate-400 hover:text-indigo-500"><Edit2 size={10} /></button>
+                                        <button onClick={() => handleDeleteReply(rev, reply)} className="text-slate-400 hover:text-red-500"><Trash2 size={10} /></button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  
+                                  {isEditingReply ? (
+                                    <div className="mt-1 relative">
+                                      <textarea 
+                                        className="w-full p-2 border border-indigo-300 rounded-md text-[11px] bg-indigo-50/30 outline-none resize-none" 
+                                        rows="1" value={editingReply?.text || ''} 
+                                        onChange={(e) => setEditingReply({ ...editingReply, text: e.target.value })}
+                                        onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
+                                      />
+                                      <div className="flex justify-end gap-1 mt-1">
+                                        <button onClick={() => setEditingReply(null)} className="text-[9px] text-slate-500 px-1.5 py-0.5 bg-slate-200 rounded font-bold">취소</button>
+                                        <button onClick={() => submitEditReply(rev, reply)} className="text-[9px] text-white px-1.5 py-0.5 bg-indigo-600 rounded font-bold">수정</button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-slate-600 leading-snug">{reply?.text}</p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 💡 [UX 개선 핵심 영역] 다른 곳 입력 중일 때 최하단 메인 폼 스위칭 */}
+          <div className={`p-4 pt-3 bg-white border-t border-slate-100 shrink-0 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.05)] transition-all duration-300 ${isKeyboardActive ? 'pb-[35vh]' : 'pb-4'}`}>
+            {isUserActiveOnOtherInput ? (
+              // 다른창 입력중일 때 띄워줄 안내 가이드바 (화면 공간 확보 및 레이아웃 패딩 유지)
+              <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200/80 animate-fade-in">
+                <p className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                  {replyingTo && "💬 리뷰에 답글을 작성하고 있습니다."}
+                  {editingReview && "✍️ 내가 쓴 리뷰를 수정하고 있습니다."}
+                  {editingReply && "✍️ 내가 쓴 답글을 수정하고 있습니다."}
+                </p>
+                <button 
+                  onClick={handleCancelSubInputs}
+                  className="text-[11px] font-extrabold bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-lg hover:bg-slate-300 transition-colors whitespace-nowrap"
+                >
+                  작성 취소
+                </button>
+              </div>
+            ) : !user ? (
+              <div className="flex flex-col items-center justify-center p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-[13px] font-bold text-slate-600 mb-2">리뷰를 작성하려면 로그인이 필요합니다.</p>
+              </div>
+            ) : (
+              // 💡 0.5 별점 기능이 추가된 메인 리뷰 작성 창
+              <>
+                <div className="flex items-center gap-1 mb-2 px-1">
+                  <span className="text-[11px] font-bold text-slate-500 mr-2">별점:</span>
+                  <div className="flex items-center">
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const isFull = star <= rating;
+                      const isHalf = star - 0.5 === rating;
+                      return (
+                        <div 
+                          key={star} 
+                          className="p-1 cursor-pointer transition-transform hover:scale-110 active:scale-95"
+                          onClick={(e) => {
+                            // 💡 터치한 좌표 X값을 가져와 별의 절반을 넘었는지(1점) 안 넘었는지(0.5점) 정밀 계산
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const isHalfClick = e.clientX - rect.left < rect.width / 2;
+                            setRating(isHalfClick ? star - 0.5 : star);
+                          }}
+                        >
+                          <div className="relative">
+                            <Star size={20} className="text-slate-200 fill-slate-50 drop-shadow-sm" />
+                            {(isFull || isHalf) && (
+                              <div className="absolute top-0 left-0 overflow-hidden pointer-events-none" style={{ width: isHalf ? '50%' : '100%' }}>
+                                <Star size={20} className="fill-amber-400 text-amber-400 drop-shadow-sm" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <span className="text-xs font-bold text-amber-500 ml-1">{rating}</span>
+                </div>
+                <div className="relative">
+                  <textarea
+                    className="w-full p-3 pr-12 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-[13px] bg-slate-50 transition-all"
+                    rows="2" placeholder="이 판사에 대한 경험을 나누어주세요." value={reviewText} onChange={(e) => setReviewText(e.target.value)}
+                    onFocus={() => setIsKeyboardActive(true)} onBlur={() => setIsKeyboardActive(false)}
+                  />
+                  <button onClick={submitReview} className={`absolute right-2 bottom-2 p-2 rounded-xl transition-all ${reviewText.trim() ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                    <MessageSquare size={16} />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      )}
-
-      {selectedJudge && (
-        <JudgeDetailModal 
-          key={selectedJudge.id} 
-          judge={selectedJudge} 
-          keyboardOffset={keyboardOffset} 
-          allJudges={judges} 
-          user={user} 
-          onClose={() => window.history.back()}
-          showToast={showToast} 
-          currentTab={currentTab} 
-          selectedRegionName={selectedRegionName} 
-        />
-      )}
-      {editModalJudge && <AdminEditModal judge={editModalJudge} keyboardOffset={keyboardOffset} onClose={() => setEditModalJudge(null)} showToast={showToast} />}
-
-      <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-slate-200 flex justify-between items-center px-4 pb-[max(env(safe-area-inset-bottom),12px)] z-40 shadow-[0_-5px_15px_-5px_rgba(0,0,0,0.05)]">
-        <button onClick={() => handleTabChange('map')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'map' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><MapIcon size={20} className="mb-1" /><span className="text-[9px] font-bold">지도 검색</span></button>
-        <button onClick={() => handleTabChange('search')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'search' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><Search size={20} className="mb-1" /><span className="text-[9px] font-bold">통합 검색</span></button>
-        <button onClick={() => handleTabChange('register')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'register' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><PlusCircle size={20} className="mb-1" /><span className="text-[9px] font-bold">판사 등록</span></button>
-        <button onClick={() => handleTabChange('mypage')} className={`flex flex-col items-center p-2 w-1/4 transition-colors ${currentTab === 'mypage' ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}><UserCircle size={20} className="mb-1" /><span className="text-[9px] font-bold">마이페이지</span></button>
-      </nav>
-    </div>
+      </div>
+      
+      {reportModalReview && <ReportModal review={reportModalReview} judgeId={judge.id} user={user} onClose={() => setReportModalReview(null)} showToast={showToast} />}
+    </>
   );
 }

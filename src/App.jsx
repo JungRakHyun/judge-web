@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as echarts from 'echarts';
 import { 
   Scale, LogIn, Map as MapIcon, Search, PlusCircle, UserCircle, Star, ChevronRight, 
-  ShieldAlert, Settings, Edit, Trash2, CheckCircle2, AlertCircle, MapPin, X 
+  ShieldAlert, Settings, Edit, Trash2, CheckCircle2, AlertCircle, MapPin, X, Heart 
 } from 'lucide-react';
 import { db, auth, googleProvider } from './firebase'; 
 import { collection, onSnapshot, doc, addDoc, query, where, deleteDoc } from 'firebase/firestore';
@@ -91,8 +91,6 @@ export default function JudgeMapApp() {
   const lastBackPressRef = useRef(0);
 
   useEffect(() => {
-    // 1. 앱 실행 직후 바로 뒤로가기 시 튕기는 현상 해결 (루트 2 완벽 대응)
-    // 바닥 기록을 지우지 않고 방어막(exit_trap)을 안전하게 한 겹 씌워야 앱이 바로 안 꺼집니다.
     if (!window.history.state || window.history.state.step !== 'main') {
       window.history.pushState({ step: 'exit_trap' }, '');
       window.history.pushState({ step: 'main', tab: currentTabRef.current }, '');
@@ -101,14 +99,11 @@ export default function JudgeMapApp() {
     const handlePopState = (e) => {
       const state = e.state;
 
-      // state가 없거나 exit_trap에 도달한 경우 (모든 팝업이 닫힌 바닥 상태)
       if (!state || state.step === 'exit_trap') {
         const now = Date.now();
         if (now - lastBackPressRef.current < 2000) {
-          // 2초 내에 한 번 더 누르면 앱 찐으로 종료
           window.history.back(); 
         } else {
-          // 처음 누른 거면 종료 안내 메시지 띄우고 다시 방어막(main 스택) 리필
           lastBackPressRef.current = now;
           showToast("뒤로가기 버튼을 한 번 더 누르면 종료됩니다.");
           window.history.pushState({ step: 'main', tab: currentTabRef.current }, ''); 
@@ -117,19 +112,16 @@ export default function JudgeMapApp() {
           setSelectedJudge(null);
         }
       } 
-      // 뒤로가기를 눌러 '메인' 스택으로 빠져나온 경우 (팝업에서 메인 복귀)
       else if (state.step === 'main') {
         setCurrentTab('map');
         setSelectedRegionName(null);
         setSelectedJudge(null);
       } 
-      // 뒤로가기를 눌러 '지역 리스트' 스택으로 빠져나온 경우 (상세에서 리스트 복귀)
       else if (state.step === 'region') {
         setCurrentTab('map');
         setSelectedRegionName(state.region);
         setSelectedJudge(null);
       } 
-      // 뒤로가기를 눌러 '타 탭' 스택으로 빠져나온 경우
       else if (state.step === 'tab') {
         setCurrentTab(state.tab);
         setSelectedRegionName(null);
@@ -141,7 +133,6 @@ export default function JudgeMapApp() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  // 탭 전환 시 히스토리 스택 추가하여 뒤로가기 흐름 유지 (루트 3 꼬임 해결 소스 그대로)
   const handleTabChange = (tabName) => {
     if (currentTab === tabName) return;
     
@@ -157,7 +148,6 @@ export default function JudgeMapApp() {
   };
   // =====================================================================
 
-  // 인트로 애니메이션 기동 조건 절
   useEffect(() => { 
     if (showSplash) {
       setTimeout(() => {
@@ -171,7 +161,6 @@ export default function JudgeMapApp() {
     sessionStorage.setItem('currentTab', currentTab);
   }, [currentTab]);
 
-  // 시스템 소프트 키보드 활성화 시 인풋 영역 시야 확보 세팅
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -183,7 +172,6 @@ export default function JudgeMapApp() {
     return () => window.visualViewport?.removeEventListener('resize', handleResize);
   }, []);
 
-  // 파이어베이스 실시간 사용자 인스턴스 갱신
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -196,7 +184,6 @@ export default function JudgeMapApp() {
     setDisplayCount(10);
   }, [searchQuery, sortOption, currentTab, selectedRegionName]);
 
-  // 외부 도메인 유입 라우팅 딥링크 처리
   useEffect(() => {
     if (judges.length > 0) {
       const urlParams = new URLSearchParams(window.location.search);
@@ -213,7 +200,6 @@ export default function JudgeMapApp() {
     }
   }, [judges]);
   
-  // 스크롤 바운더리 감지형 페이징 데이터 인덱싱
   const lastElementRef = useCallback(node => {
     if (isLoadingData) return;
     if (observer.current) observer.current.disconnect();
@@ -225,7 +211,6 @@ export default function JudgeMapApp() {
     if (node) observer.current.observe(node);
   }, [isLoadingData]);
 
-  // Firestore 데이터베이스 실시간 스트림 파이프라인
   useEffect(() => {
     if (isAuthLoading) return;
 
@@ -249,7 +234,6 @@ export default function JudgeMapApp() {
     return () => { unsubJudges(); unsubReports(); };
   }, [selectedJudge?.id, user?.uid, isAuthLoading]);
 
-  // 대한민국 지도 인스턴스 셋업
   useEffect(() => {
     if (currentTab !== 'map' || showSplash) return;
     
@@ -263,13 +247,12 @@ export default function JudgeMapApp() {
         setTimeout(() => {
           if (mapRef.current) {
             myChart = echarts.init(mapRef.current);
-            mapChartRef.current = myChart; // 인스턴스 저장 (줌 버튼에서 사용)
+            mapChartRef.current = myChart; 
             echarts.registerMap('korea', geoJson);
             myChart.setOption({
               tooltip: { show: false },
               series: [{
                 type: 'map', map: 'korea', 
-                // 터치 확대(핀치 줌) 차단. 오직 드래그(이동)만 가능하도록 설정
                 roam: 'move', 
                 zoom: mapZoomRef.current, 
                 center: [127.7, 36.3], selectedMode: 'single',
@@ -353,6 +336,9 @@ export default function JudgeMapApp() {
   judges.forEach(j => { j.reviews?.forEach(r => { if (r.uid === user?.uid) myReviews.push({ judgeId: j.id, judgeName: j.name, court: j.court, ...r }); }); });
   myReviews.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const myBadge = getUserBadge(myReviews.length);
+
+  // 💡 관심 판사 데이터 추출 로직
+  const bookmarkedJudges = user ? judges.filter(j => j?.bookmarkedUsers?.includes(user.uid)) : [];
 
   if (showSplash || isAuthLoading) {
     return (
@@ -581,8 +567,35 @@ export default function JudgeMapApp() {
                 </div>
               )}
 
+              {/* 💡 관심 판사 내역 조회 */}
+              <div className="p-4 pb-0 border-b border-slate-100 border-dashed">
+                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 flex items-center gap-1">
+                  <Heart size={16} className="text-pink-500 fill-pink-500" /> 내 관심 판사
+                </h3>
+                {isLoadingData ? (
+                  <div className="space-y-3 mb-4">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-20"></div>)}</div>
+                ) : bookmarkedJudges.length === 0 ? ( 
+                  <p className="text-center text-xs text-slate-400 py-8 mb-4 bg-white rounded-xl border border-slate-200">등록된 관심 판사가 없습니다.</p> 
+                ) : (
+                  <div className="space-y-3 mb-4">
+                    {bookmarkedJudges.map((j) => (
+                      <div key={j.id} onClick={() => {
+                        window.history.pushState({ step: 'judge', judgeId: j.id }, '');
+                        setSelectedJudge(j);
+                      }} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm cursor-pointer hover:border-pink-300 hover:bg-pink-50/30 transition-colors flex justify-between items-center group">
+                        <div>
+                          <p className="text-[10px] font-bold text-pink-500 mb-0.5">{j.court} • {j.department}</p>
+                          <p className="text-sm font-extrabold text-slate-800 group-hover:text-pink-600">{j.name} <span className="text-[11px] font-medium text-slate-500">{j.title}</span></p>
+                        </div>
+                        <ChevronRight size={16} className="text-slate-300 group-hover:text-pink-400" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="p-4 pb-4">
-                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1">내가 작성한 리뷰</h3>
+                <h3 className="text-sm font-bold text-slate-800 mb-3 px-1 mt-2">내가 작성한 리뷰</h3>
                 {isLoadingData ? (
                   <div className="space-y-3">{[1, 2].map(i => <div key={i} className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm animate-pulse h-24"></div>)}</div>
                 ) : myReviews.length === 0 ? ( 
